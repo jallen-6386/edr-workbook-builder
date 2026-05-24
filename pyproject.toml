@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "edr-workbook-builder"
+version = "0.1.0"
+description = "Combine CrowdStrike EDR CSV exports into a single Excel workbook for CSIRT analysis"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "pandas>=2.0",
+    "openpyxl>=3.1",
+]
+
+[project.scripts]
+edr-workbook-builder = "edr_workbook_builder.cli:run"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["edr_workbook_builder*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
