@@ -15,6 +15,7 @@ workbook for analysis — including with Excel Copilot.
 3. Writes each CSV as a separate worksheet, named after the process
 4. Formats every sheet: header row, freeze panes, auto-filter, auto-sized columns
 5. Optionally adds an `Analysis_Summary` sheet with case metadata, row counts,
+   column inventory matrix, parent/child process relationship table,
    import warnings, analyst notes, and suggested Excel Copilot prompts
 
 ---
@@ -170,6 +171,11 @@ When `--summary` is passed, the first worksheet contains:
 - **Case information** — case/alert name, generation timestamp, tool version
 - **Processing statistics** — files found, processed, skipped, total row count
 - **Worksheet inventory** — table of sheet name / source CSV / detected process / row count / status
+- **Column inventory matrix** — per-sheet table showing row count, column count, and which key EDR
+  field groups are present (Timestamp, ProcessId, ImageFileName, CommandLine, ParentProcessId,
+  ParentProcess, Network, FileTarget, Hash, Registry) plus the full column list
+- **Parent/child process relationship table** — automatically built from `ParentProcessId` /
+  `ProcessId` columns when present; shows unique parent→child process pairs with PIDs and source sheet
 - **Import errors** — any files that could not be loaded and why
 - **Analyst notes** — 6 blank lines for manual notes during analysis
 - **Suggested Excel Copilot prompts** — ready-to-paste prompts for EDR analysis:
@@ -268,8 +274,8 @@ edr-workbook-builder/
 
 | Version | Focus |
 |---|---|
-| **v0.1** (current) | MVP: folder → workbook, process detection, safe sheet names, optional summary sheet |
-| **v0.2** | Better summary: parent/child process relationship table, per-sheet column inventory |
+| **v0.1** | MVP: folder → workbook, process detection, safe sheet names, optional summary sheet |
+| **v0.2** (current) | Better summary: column inventory matrix, parent/child process relationship table |
 | **v0.3** | Suspicious pattern highlighting: base64 detection, LOLBin flagging, formula-escape option |
 | **v0.4** | Timeline sheet: unified chronological view across all CSVs using timestamp columns |
 | **v1.0** | Polished internal SOC utility: config file, MITRE ATT&CK column tagging, process tree reconstruction |
