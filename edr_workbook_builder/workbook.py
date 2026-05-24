@@ -9,6 +9,12 @@ Formatting choices:
     (prevents CommandLine columns from making the sheet unusably wide)
   - All values written as strings — no type inference that could mangle
     hashes, timestamps, or numeric PIDs
+  - Optional row highlighting for suspicious patterns (--highlight):
+      yellow  = LOLBin process name (severity 1)
+      salmon  = possible obfuscation, base64, or hex blob (severity 2)
+      red     = PowerShell -EncodedCommand detected (severity 3)
+  - Optional formula escaping (--escape-formulas): cell values starting
+    with =, +, -, or @ are prefixed with ' to prevent formula injection
 """
 
 import logging
@@ -22,6 +28,14 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from openpyxl.utils.dataframe import dataframe_to_rows
 
+from edr_workbook_builder.patterns import (
+    FORMULA_PFXS,
+    RowFinding,
+    SuspiciousMatch,
+    check_row,
+    max_severity,
+)
+
 logger = logging.getLogger(__name__)
 
 _HEADER_FILL = PatternFill(start_color="1F497D", end_color="1F497D", fill_type="solid")
@@ -29,6 +43,13 @@ _HEADER_FONT = Font(name="Calibri", bold=True, color="FFFFFF", size=11)
 _HEADER_ALIGN = Alignment(horizontal="left", vertical="center")
 _BODY_FONT = Font(name="Calibri", size=10)
 _BODY_ALIGN = Alignment(horizontal="left", vertical="center", wrap_text=False)
+
+# Row fill colors by severity level.
+_SEVERITY_FILLS = {
+    1: PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid"),  # yellow  - LOLBin
+    2: PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid"),  # salmon  - obfuscation
+    3: PatternFill(start_color="FFCCCC", end_color="FFCCCC", fill_type="solid"),  # red     - encoded cmd
+}
 
 _MAX_COL_WIDTH = 60
 _MIN_COL_WIDTH = 8
@@ -54,12 +75,20 @@ def write_dataframe_to_sheet(
     df: pd.DataFrame,
     add_source: bool = False,
     source_name: str = "",
-) -> None:
-    """Write a DataFrame to an openpyxl worksheet with standard EDR formatting."""
+    highlight_suspicious: bool = False,
+    escape_formulas: bool = False,
+) -> list[tuple[int, list[SuspiciousMatch]]]:
+    """
+    Write a DataFrame to an openpyxl worksheet with standard EDR formatting.
+
+    Returns a list of (1-indexed data row number, suspicious matches) for any
+    rows that matched suspicious patterns. Empty list when highlight_suspicious
+    is False or no matches were found.
+    """
     if df.empty and len(df.columns) == 0:
         ws["A1"] = "(no data in source CSV)"
         ws["A1"].font = Font(name="Calibri", italic=True, color="808080")
-        return
+        return []
 
     if add_source and source_name:
         df = df.copy()
@@ -67,16 +96,43 @@ def write_dataframe_to_sheet(
 
     df = df.fillna("")
 
-    for r_idx, row in enumerate(dataframe_to_rows(df, index=False, header=True), start=1):
-        for c_idx, value in enumerate(row, start=1):
-            cell = ws.cell(row=r_idx, column=c_idx, value=value)
-            if r_idx == 1:
+    # Pre-compute pattern matches for every data row when highlighting is on.
+    # Done up front so the writing loop stays linear.
+    row_matches_list: list[list[SuspiciousMatch]] = []
+    if highlight_suspicious:
+        for _, row in df.iterrows():
+            row_matches_list.append(check_row(row))
+    else:
+        row_matches_list = [[] for _ in range(len(df))]
+
+    findings: list[tuple[int, list[SuspiciousMatch]]] = []
+    data_row_idx = 0
+
+    for r_idx, row_vals in enumerate(dataframe_to_rows(df, index=False, header=True), start=1):
+        if r_idx == 1:
+            for c_idx, value in enumerate(row_vals, start=1):
+                cell = ws.cell(row=r_idx, column=c_idx, value=value)
                 cell.font = _HEADER_FONT
                 cell.fill = _HEADER_FILL
                 cell.alignment = _HEADER_ALIGN
-            else:
+        else:
+            matches = row_matches_list[data_row_idx] if data_row_idx < len(row_matches_list) else []
+            severity = max_severity(matches)
+            row_fill = _SEVERITY_FILLS.get(severity)
+
+            for c_idx, value in enumerate(row_vals, start=1):
+                if escape_formulas and isinstance(value, str) and value and value[0] in FORMULA_PFXS:
+                    value = "'" + value
+                cell = ws.cell(row=r_idx, column=c_idx, value=value)
                 cell.font = _BODY_FONT
                 cell.alignment = _BODY_ALIGN
+                if row_fill:
+                    cell.fill = row_fill
+
+            if matches:
+                findings.append((data_row_idx + 1, matches))
+
+            data_row_idx += 1
 
     ws.freeze_panes = "A2"
     ws.row_dimensions[1].height = 18
@@ -85,6 +141,8 @@ def write_dataframe_to_sheet(
         ws.auto_filter.ref = ws.dimensions
 
     _auto_size_columns(ws, df)
+
+    return findings
 
 
 def build_workbook(
@@ -96,14 +154,21 @@ def build_workbook(
     add_summary: bool = False,
     add_source_column: bool = False,
     timestamp: Optional[datetime] = None,
-) -> None:
-    """Assemble and save the Excel workbook from loaded CSV results."""
+    highlight_suspicious: bool = False,
+    escape_formulas: bool = False,
+) -> list[RowFinding]:
+    """Assemble and save the Excel workbook from loaded CSV results.
+
+    Returns the list of suspicious row findings (empty when highlight_suspicious
+    is False or no suspicious patterns were detected).
+    """
     if timestamp is None:
         timestamp = datetime.now()
 
     wb = Workbook()
     wb.remove(wb.active)
 
+    all_findings: list[RowFinding] = []
     sheets_created = 0
 
     for result, sheet_name in zip(load_results, sheet_names):
@@ -111,16 +176,28 @@ def build_workbook(
             continue
 
         ws = wb.create_sheet(title=sheet_name)
-        write_dataframe_to_sheet(
+        sheet_findings = write_dataframe_to_sheet(
             ws,
             result.dataframe,
             add_source=add_source_column,
             source_name=result.path.name,
+            highlight_suspicious=highlight_suspicious,
+            escape_formulas=escape_formulas,
         )
         sheets_created += 1
         logger.debug("Wrote sheet '%s' (%d rows)", sheet_name, result.row_count)
 
-    # Guarantee at least one sheet (Excel requires it)
+        for data_row, matches in sheet_findings:
+            process_name = next((m.process_exe for m in matches if m.process_exe), "")
+            all_findings.append(RowFinding(
+                sheet_name=sheet_name,
+                data_row=data_row,
+                process_name=process_name,
+                reasons=[m.reason for m in matches],
+                severity=max_severity(matches),
+            ))
+
+    # Guarantee at least one sheet (Excel requires it).
     if sheets_created == 0 and not add_summary:
         ws = wb.create_sheet(title="No Data")
         ws["A1"] = "No CSV files could be processed. Run with --verbose for details."
@@ -136,6 +213,7 @@ def build_workbook(
             load_results=load_results,
             sheet_names=sheet_names,
             process_names=process_names,
+            suspicious_findings=all_findings if highlight_suspicious else None,
         )
 
     wb.properties.title = case_name or "EDR Analysis Workbook"
@@ -144,3 +222,5 @@ def build_workbook(
 
     wb.save(output_path)
     logger.info("Workbook saved: %s", output_path)
+
+    return all_findings

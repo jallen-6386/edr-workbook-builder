@@ -54,6 +54,8 @@ examples:
   python edr_csv_to_xlsx.py -i ./crowdstrike_exports
   python edr_csv_to_xlsx.py -i ./exports -o ./case123_edr.xlsx
   python edr_csv_to_xlsx.py -i ./exports --case-name "Suspicious PowerShell" --summary
+  python edr_csv_to_xlsx.py -i ./exports --summary --highlight
+  python edr_csv_to_xlsx.py -i ./exports --highlight --escape-formulas
   python edr_csv_to_xlsx.py -i ./exports --recursive --summary --verbose
   python edr_csv_to_xlsx.py -i ./exports --dry-run
         """,
@@ -82,6 +84,21 @@ examples:
     parser.add_argument(
         "--add-source-column", action="store_true",
         help="Prepend a SourceFile column showing the origin CSV on each worksheet",
+    )
+    parser.add_argument(
+        "--highlight", action="store_true",
+        help=(
+            "Highlight suspicious rows in each data sheet: "
+            "yellow = LOLBin process, salmon = possible obfuscation, "
+            "red = PowerShell -EncodedCommand detected"
+        ),
+    )
+    parser.add_argument(
+        "--escape-formulas", action="store_true",
+        help=(
+            "Prefix cell values starting with =, +, -, or @ with a single quote "
+            "to prevent accidental formula execution when opening in Excel"
+        ),
     )
     parser.add_argument(
         "-v", "--verbose", action="store_true",
@@ -144,6 +161,10 @@ def main() -> int:
             flags.append("--recursive")
         if args.add_source_column:
             flags.append("--add-source-column")
+        if args.highlight:
+            flags.append("--highlight")
+        if args.escape_formulas:
+            flags.append("--escape-formulas")
         if flags:
             print(f"[DRY RUN] Flags:   {' '.join(flags)}")
         print(f"\n[DRY RUN] {len(csv_files)} file(s) would be processed:")
@@ -190,7 +211,7 @@ def main() -> int:
 
     # --- Build workbook ---
     try:
-        build_workbook(
+        findings = build_workbook(
             load_results=load_results,
             sheet_names=sheet_names,
             process_names=process_names,
@@ -199,6 +220,8 @@ def main() -> int:
             add_summary=args.summary,
             add_source_column=args.add_source_column,
             timestamp=timestamp,
+            highlight_suspicious=args.highlight,
+            escape_formulas=args.escape_formulas,
         )
     except Exception as exc:
         logger.error("Failed to create workbook: %s", exc)
@@ -219,6 +242,27 @@ def main() -> int:
         print(f"  Skipped:    {failed} file(s) — run with --verbose for details")
     if args.summary:
         print("  Includes:   Analysis_Summary sheet")
+
+    if args.highlight:
+        if findings:
+            high = sum(1 for f in findings if f.severity >= 3)
+            medium = sum(1 for f in findings if f.severity == 2)
+            lolbin = sum(1 for f in findings if f.severity == 1)
+            parts = []
+            if high:
+                parts.append(f"{high} High")
+            if medium:
+                parts.append(f"{medium} Medium")
+            if lolbin:
+                parts.append(f"{lolbin} LOLBin")
+            detail = f" ({', '.join(parts)})" if parts else ""
+            suffix = " — see Analysis_Summary sheet" if args.summary else ""
+            print(f"  Suspicious: {len(findings)} row(s) flagged{detail}{suffix}")
+        else:
+            print("  Suspicious: no patterns detected")
+
+    if args.escape_formulas:
+        print("  Formulas:   formula-injection escaping applied")
 
     return 0
 

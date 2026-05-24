@@ -14,9 +14,11 @@ workbook for analysis — including with Excel Copilot.
 2. Detects the process name from CrowdStrike EDR column names
 3. Writes each CSV as a separate worksheet, named after the process
 4. Formats every sheet: header row, freeze panes, auto-filter, auto-sized columns
-5. Optionally adds an `Analysis_Summary` sheet with case metadata, row counts,
-   column inventory matrix, parent/child process relationship table,
-   import warnings, analyst notes, and suggested Excel Copilot prompts
+5. Optionally highlights suspicious rows — LOLBin processes (yellow), possible
+   obfuscation (salmon), PowerShell `-EncodedCommand` (red) — with `--highlight`
+6. Optionally adds an `Analysis_Summary` sheet with case metadata, row counts,
+   column inventory matrix, parent/child process relationship table, suspicious
+   activity summary, analyst notes, and suggested Excel Copilot prompts
 
 ---
 
@@ -81,6 +83,33 @@ Output: `edr_analysis_Falcon_Alert___Suspicious_PowerShell_20240612_143022.xlsx`
 
 ---
 
+### Highlight suspicious rows
+
+```bash
+python edr_csv_to_xlsx.py -i ./exports --summary --highlight
+```
+
+Rows are color-coded in each data sheet:
+- **Yellow** — LOLBin process (powershell, rundll32, certutil, mshta, …)
+- **Salmon** — possible base64 or hex-encoded argument
+- **Red** — PowerShell `-EncodedCommand` detected
+
+The `Analysis_Summary` sheet gains a **Suspicious Activity** section listing every
+flagged row when `--highlight` and `--summary` are used together.
+
+---
+
+### Prevent formula injection
+
+```bash
+python edr_csv_to_xlsx.py -i ./exports --escape-formulas
+```
+
+Cell values starting with `=`, `+`, `-`, or `@` are prefixed with `'` so Excel
+does not interpret them as formulas when the workbook is opened.
+
+---
+
 ### Full options
 
 ```bash
@@ -89,6 +118,8 @@ python edr_csv_to_xlsx.py \
   --output ./output/case123.xlsx \
   --case-name "INC-2024-0042" \
   --summary \
+  --highlight \
+  --escape-formulas \
   --recursive \
   --add-source-column \
   --verbose
@@ -112,6 +143,8 @@ python edr_csv_to_xlsx.py --input ./exports --dry-run
 | `--output FILE` | `-o` | Output `.xlsx` path (default: `edr_analysis_<timestamp>.xlsx`) |
 | `--case-name NAME` | | Case or alert name — shown in filename and summary sheet |
 | `--summary` | | Add `Analysis_Summary` as the first worksheet |
+| `--highlight` | | Color-code suspicious rows (LOLBin, obfuscation, encoded commands) |
+| `--escape-formulas` | | Prefix `=`/`+`/`-`/`@` cell values with `'` to prevent formula injection |
 | `--recursive` | `-r` | Search subfolders for CSV files |
 | `--add-source-column` | | Prepend a `SourceFile` column to each worksheet |
 | `--verbose` | `-v` | Debug-level logging |
@@ -176,6 +209,8 @@ When `--summary` is passed, the first worksheet contains:
   ParentProcess, Network, FileTarget, Hash, Registry) plus the full column list
 - **Parent/child process relationship table** — automatically built from `ParentProcessId` /
   `ProcessId` columns when present; shows unique parent→child process pairs with PIDs and source sheet
+- **Suspicious Activity summary** — when `--highlight` is also used, lists every flagged row with
+  sheet, row number, process name, detected pattern, and severity (High / Medium / Info)
 - **Import errors** — any files that could not be loaded and why
 - **Analyst notes** — 6 blank lines for manual notes during analysis
 - **Suggested Excel Copilot prompts** — ready-to-paste prompts for EDR analysis:
@@ -208,7 +243,8 @@ When `--summary` is passed, the first worksheet contains:
   interpret it as a formula when you open the file. This is a general Excel risk
   with any external data. Mitigate by keeping Excel macro security at the default
   "Disable all macros with notification" setting and reviewing any prompted formulas
-  before enabling them. A future `--escape-formulas` flag is planned for v0.3.
+  before enabling them. Use `--escape-formulas` to prefix vulnerable cell values
+  with `'` and prevent accidental formula execution.
 
 - **Sensitive data in the workbook**: The `.xlsx` output contains the full content
   of your EDR exports. Handle it with the same care as the source CSVs —
@@ -275,8 +311,8 @@ edr-workbook-builder/
 | Version | Focus |
 |---|---|
 | **v0.1** | MVP: folder → workbook, process detection, safe sheet names, optional summary sheet |
-| **v0.2** (current) | Better summary: column inventory matrix, parent/child process relationship table |
-| **v0.3** | Suspicious pattern highlighting: base64 detection, LOLBin flagging, formula-escape option |
+| **v0.2** | Better summary: column inventory matrix, parent/child process relationship table |
+| **v0.3** (current) | Suspicious pattern highlighting: LOLBin flagging, base64/encoded command detection, `--escape-formulas` |
 | **v0.4** | Timeline sheet: unified chronological view across all CSVs using timestamp columns |
 | **v1.0** | Polished internal SOC utility: config file, MITRE ATT&CK column tagging, process tree reconstruction |
 
