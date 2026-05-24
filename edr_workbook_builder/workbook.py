@@ -18,6 +18,7 @@ Formatting choices:
 """
 
 import logging
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -35,6 +36,19 @@ from edr_workbook_builder.patterns import (
     check_row,
     max_severity,
 )
+from edr_workbook_builder.timeline import (
+    build_timeline_df,
+    find_best_timestamp_column,
+)
+
+
+@dataclass
+class WorkbookResult:
+    findings: list[RowFinding] = field(default_factory=list)
+    timeline_row_count: int = 0
+    timeline_included: list[str] = field(default_factory=list)
+    timeline_excluded: list[str] = field(default_factory=list)
+    timeline_timestamp_col: Optional[str] = None
 
 logger = logging.getLogger(__name__)
 
@@ -156,11 +170,12 @@ def build_workbook(
     timestamp: Optional[datetime] = None,
     highlight_suspicious: bool = False,
     escape_formulas: bool = False,
-) -> list[RowFinding]:
+    add_timeline: bool = False,
+) -> WorkbookResult:
     """Assemble and save the Excel workbook from loaded CSV results.
 
-    Returns the list of suspicious row findings (empty when highlight_suspicious
-    is False or no suspicious patterns were detected).
+    Returns a WorkbookResult containing suspicious row findings and timeline
+    metadata (counts, included/excluded sheets, timestamp column used).
     """
     if timestamp is None:
         timestamp = datetime.now()
@@ -198,10 +213,40 @@ def build_workbook(
             ))
 
     # Guarantee at least one sheet (Excel requires it).
-    if sheets_created == 0 and not add_summary:
+    if sheets_created == 0 and not add_summary and not add_timeline:
         ws = wb.create_sheet(title="No Data")
         ws["A1"] = "No CSV files could be processed. Run with --verbose for details."
         ws["A1"].font = Font(name="Calibri", bold=True, color="C00000")
+
+    # Timeline sheet — inserted at index 0, pushed to index 1 when summary is added.
+    result = WorkbookResult(findings=all_findings)
+    if add_timeline:
+        ts_col = find_best_timestamp_column(load_results, sheet_names)
+        if ts_col is None:
+            logger.warning(
+                "Timeline: no timestamp column found across loaded CSVs — "
+                "sheet not created (looked for: Timestamp, EventTimeUTC, "
+                "ContextTimeStamp, EventTime, StartTime, EndTime, CreationTime)",
+            )
+        else:
+            tl_df, tl_included, tl_excluded = build_timeline_df(
+                load_results, sheet_names, ts_col
+            )
+            if tl_df is not None:
+                ws_tl = wb.create_sheet(title="Timeline", index=0)
+                ws_tl.sheet_properties.tabColor = "70AD47"  # green tab for easy navigation
+                write_dataframe_to_sheet(ws_tl, tl_df)
+                result.timeline_timestamp_col = ts_col
+                result.timeline_row_count = len(tl_df)
+                result.timeline_included = tl_included
+                result.timeline_excluded = tl_excluded
+                logger.info(
+                    "Timeline: %d rows from %d sheet(s) sorted by '%s'%s",
+                    len(tl_df), len(tl_included), ts_col,
+                    f" ({len(tl_excluded)} excluded — no '{ts_col}' column)" if tl_excluded else "",
+                )
+            else:
+                logger.warning("Timeline: no sheets contained '%s' — sheet not created", ts_col)
 
     if add_summary:
         from edr_workbook_builder.summary import create_summary_sheet
@@ -223,4 +268,4 @@ def build_workbook(
     wb.save(output_path)
     logger.info("Workbook saved: %s", output_path)
 
-    return all_findings
+    return result

@@ -14,9 +14,11 @@ workbook for analysis — including with Excel Copilot.
 2. Detects the process name from CrowdStrike EDR column names
 3. Writes each CSV as a separate worksheet, named after the process
 4. Formats every sheet: header row, freeze panes, auto-filter, auto-sized columns
-5. Optionally highlights suspicious rows — LOLBin processes (yellow), possible
+5. Optionally creates a **Timeline** sheet — all events merged and sorted
+   chronologically across every CSV on the best shared timestamp column
+6. Optionally highlights suspicious rows — LOLBin processes (yellow), possible
    obfuscation (salmon), PowerShell `-EncodedCommand` (red) — with `--highlight`
-6. Optionally adds an `Analysis_Summary` sheet with case metadata, row counts,
+7. Optionally adds an `Analysis_Summary` sheet with case metadata, row counts,
    column inventory matrix, parent/child process relationship table, suspicious
    activity summary, analyst notes, and suggested Excel Copilot prompts
 
@@ -83,6 +85,20 @@ Output: `edr_analysis_Falcon_Alert___Suspicious_PowerShell_20240612_143022.xlsx`
 
 ---
 
+### Add a Timeline sheet
+
+```bash
+python edr_csv_to_xlsx.py -i ./exports --timeline
+```
+
+Merges all CSV events into a single **Timeline** sheet (green tab) sorted
+chronologically. Automatically detects the best shared timestamp column
+(`Timestamp`, `EventTimeUTC`, `ContextTimeStamp`, etc.). A `SourceSheet` column
+is prepended so every row traces back to its origin. Sheets that don't contain
+the chosen column are excluded with a warning.
+
+---
+
 ### Highlight suspicious rows
 
 ```bash
@@ -118,6 +134,7 @@ python edr_csv_to_xlsx.py \
   --output ./output/case123.xlsx \
   --case-name "INC-2024-0042" \
   --summary \
+  --timeline \
   --highlight \
   --escape-formulas \
   --recursive \
@@ -143,6 +160,7 @@ python edr_csv_to_xlsx.py --input ./exports --dry-run
 | `--output FILE` | `-o` | Output `.xlsx` path (default: `edr_analysis_<timestamp>.xlsx`) |
 | `--case-name NAME` | | Case or alert name — shown in filename and summary sheet |
 | `--summary` | | Add `Analysis_Summary` as the first worksheet |
+| `--timeline` | | Add a Timeline sheet: all events merged and sorted chronologically |
 | `--highlight` | | Color-code suspicious rows (LOLBin, obfuscation, encoded commands) |
 | `--escape-formulas` | | Prefix `=`/`+`/`-`/`@` cell values with `'` to prevent formula injection |
 | `--recursive` | `-r` | Search subfolders for CSV files |
@@ -312,8 +330,8 @@ edr-workbook-builder/
 |---|---|
 | **v0.1** | MVP: folder → workbook, process detection, safe sheet names, optional summary sheet |
 | **v0.2** | Better summary: column inventory matrix, parent/child process relationship table |
-| **v0.3** (current) | Suspicious pattern highlighting: LOLBin flagging, base64/encoded command detection, `--escape-formulas` |
-| **v0.4** | Timeline sheet: unified chronological view across all CSVs using timestamp columns |
+| **v0.3** | Suspicious pattern highlighting: LOLBin flagging, base64/encoded command detection, `--escape-formulas` |
+| **v0.4** (current) | Timeline sheet: all events merged and sorted chronologically by detected timestamp column |
 | **v1.0** | Polished internal SOC utility: config file, MITRE ATT&CK column tagging, process tree reconstruction |
 
 ---

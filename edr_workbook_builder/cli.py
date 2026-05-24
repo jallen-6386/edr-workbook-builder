@@ -86,6 +86,13 @@ examples:
         help="Prepend a SourceFile column showing the origin CSV on each worksheet",
     )
     parser.add_argument(
+        "--timeline", action="store_true",
+        help=(
+            "Add a Timeline sheet: all events from every CSV merged and sorted "
+            "chronologically on the best shared timestamp column"
+        ),
+    )
+    parser.add_argument(
         "--highlight", action="store_true",
         help=(
             "Highlight suspicious rows in each data sheet: "
@@ -157,6 +164,8 @@ def main() -> int:
         flags = []
         if args.summary:
             flags.append("--summary")
+        if args.timeline:
+            flags.append("--timeline")
         if args.recursive:
             flags.append("--recursive")
         if args.add_source_column:
@@ -211,7 +220,7 @@ def main() -> int:
 
     # --- Build workbook ---
     try:
-        findings = build_workbook(
+        wb_result = build_workbook(
             load_results=load_results,
             sheet_names=sheet_names,
             process_names=process_names,
@@ -222,6 +231,7 @@ def main() -> int:
             timestamp=timestamp,
             highlight_suspicious=args.highlight,
             escape_formulas=args.escape_formulas,
+            add_timeline=args.timeline,
         )
     except Exception as exc:
         logger.error("Failed to create workbook: %s", exc)
@@ -243,7 +253,21 @@ def main() -> int:
     if args.summary:
         print("  Includes:   Analysis_Summary sheet")
 
+    if args.timeline:
+        if wb_result.timeline_timestamp_col:
+            excl = (f", {len(wb_result.timeline_excluded)} sheet(s) excluded — no "
+                    f"'{wb_result.timeline_timestamp_col}' column"
+                    if wb_result.timeline_excluded else "")
+            print(
+                f"  Timeline:   {wb_result.timeline_row_count:,} rows from "
+                f"{len(wb_result.timeline_included)} sheet(s), "
+                f"sorted by '{wb_result.timeline_timestamp_col}'{excl}"
+            )
+        else:
+            print("  Timeline:   no timestamp column found — sheet not created")
+
     if args.highlight:
+        findings = wb_result.findings
         if findings:
             high = sum(1 for f in findings if f.severity >= 3)
             medium = sum(1 for f in findings if f.severity == 2)
