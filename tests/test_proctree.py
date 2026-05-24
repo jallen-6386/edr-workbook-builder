@@ -139,26 +139,28 @@ class TestCollectNodes:
 
 
 class TestBuildAdjacency:
-    def _nodes(self, data):
+    def _nodes(self, data, sheet="s"):
         from edr_workbook_builder.proctree import _ProcNode
-        return [_ProcNode(pid=p, ppid=pp, exe=e, cmdline="", sheet_name="s")
-                for p, pp, e in data]
+        return [
+            _ProcNode(uid=f"{sheet}:{p}", pid=p, ppid=pp, exe=e, cmdline="", sheet_name=sheet)
+            for p, pp, e in data
+        ]
 
     def test_parent_child_link(self):
         nodes = self._nodes([("100", "0", "explorer.exe"), ("200", "100", "cmd.exe")])
-        pid_map, children, roots = _build_adjacency(nodes)
-        assert "200" in children["100"]
-        assert "100" in roots
+        uid_map, children, roots = _build_adjacency(nodes)
+        assert "s:200" in children["s:100"]
+        assert "s:100" in roots
 
     def test_root_has_no_parent_in_set(self):
         nodes = self._nodes([("100", "0", "a.exe"), ("200", "100", "b.exe")])
         _, _, roots = _build_adjacency(nodes)
-        assert roots == {"100"}
+        assert roots == {"s:100"}
 
     def test_multiple_roots(self):
         nodes = self._nodes([("1", "", "a.exe"), ("2", "", "b.exe")])
         _, _, roots = _build_adjacency(nodes)
-        assert roots == {"1", "2"}
+        assert roots == {"s:1", "s:2"}
 
 
 # ---------------------------------------------------------------------------
@@ -219,3 +221,22 @@ class TestBuildProcessTreeRows:
         rows = build_process_tree_rows([r1, r2], ["s1", "s2"])
         pids = {row["PID"] for row in rows}
         assert {"1", "2"} == pids
+
+    def test_pid_recycling_kept_separate(self):
+        # PID 100 appears on two different sheets with different processes.
+        # Both should appear as separate nodes in the tree output.
+        r1 = self._result(["100"], ["0"], ["explorer.exe"], "s1")
+        r2 = self._result(["100"], ["0"], ["svchost.exe"],  "s2")
+        rows = build_process_tree_rows([r1, r2], ["s1", "s2"])
+        # Two distinct nodes with PID=100 from different sheets.
+        pid_100_rows = [row for row in rows if row["PID"] == "100"]
+        assert len(pid_100_rows) == 2
+        sources = {row["SourceSheet"] for row in pid_100_rows}
+        assert sources == {"s1", "s2"}
+
+    def test_same_pid_same_sheet_deduped(self):
+        # The same PID appearing twice on the same sheet is collapsed.
+        r = self._result(["100", "100"], ["0", "0"], ["cmd.exe", "cmd.exe"])
+        rows = build_process_tree_rows([r], ["s1"])
+        pid_100_rows = [row for row in rows if row["PID"] == "100"]
+        assert len(pid_100_rows) == 1

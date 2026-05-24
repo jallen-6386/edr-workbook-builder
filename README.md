@@ -10,7 +10,8 @@ workbook for analysis — including with Excel Copilot.
 
 ## What it does
 
-1. Reads all `.csv` files in a folder (optionally recursive)
+1. Reads all `.csv` files in one or more folders (optionally recursive), loading
+   them in parallel for fast turnaround on large export sets
 2. Detects the process name from CrowdStrike EDR column names
 3. Writes each CSV as a separate worksheet, named after the process
 4. Formats every sheet: header row, freeze panes, auto-filter, auto-sized columns
@@ -21,6 +22,10 @@ workbook for analysis — including with Excel Copilot.
 7. Optionally adds an `Analysis_Summary` sheet with case metadata, row counts,
    column inventory matrix, parent/child process relationship table, suspicious
    activity summary, analyst notes, and suggested Excel Copilot prompts
+8. Optionally tags rows with MITRE ATT&CK technique IDs and names (`--attck`)
+9. Optionally reconstructs the process tree across all sheets (`--process-tree`)
+10. Optionally decodes PowerShell `-EncodedCommand` blobs inline (`--decode-encoded`)
+11. Optionally extracts IOCs (hashes, IP addresses) into a deduplicated sheet (`--ioc-extract`)
 
 ---
 
@@ -61,6 +66,17 @@ python edr_csv_to_xlsx.py --input ./crowdstrike_exports
 ```
 
 Output: `edr_analysis_20240612_143022.xlsx` in the current directory.
+
+---
+
+### Multiple input folders
+
+```bash
+python edr_csv_to_xlsx.py -i ./exports_host1 -i ./exports_host2 -i ./exports_host3
+```
+
+Pass `--input` / `-i` multiple times to combine exports from different hosts or
+time windows into a single workbook in one pass.
 
 ---
 
@@ -133,9 +149,10 @@ python edr_csv_to_xlsx.py -i ./exports --attck
 ```
 
 Adds an `ATT&CK` column to each data sheet immediately after the detected process
-name column. Technique IDs are derived from both the process executable name
-(e.g., `powershell.exe` → `T1059.001`) and command-line patterns (e.g.,
-`-EncodedCommand` → `T1027`, `-WindowStyle Hidden` → `T1564.003`). Multiple
+name column. Technique IDs and their human-readable names are derived from both
+the process executable name (e.g., `powershell.exe` → `T1059.001 (PowerShell)`)
+and command-line patterns (e.g., `-EncodedCommand` → `T1027 (Obfuscated Files or
+Information)`, `-WindowStyle Hidden` → `T1564.003 (Hidden Window)`). Multiple
 matching techniques are comma-separated in the same cell.
 
 ---
@@ -150,6 +167,94 @@ Adds a **ProcessTree** sheet (purple tab) built from `ProcessId` /
 `ParentProcessId` columns across all CSVs. Displays parent → child relationships
 with `├─` / `└─` tree characters. Columns: `Process`, `PID`, `PPID`,
 `CommandLine`, `SourceSheet`. Capped at 500 nodes; cycles are skipped.
+
+PID recycling is handled correctly: the same numeric PID appearing in exports from
+different time windows is treated as a separate node (keyed by `sheet:PID`), so
+unrelated processes that happen to share a PID don't collapse into one node.
+
+---
+
+### Decode PowerShell -EncodedCommand blobs
+
+```bash
+python edr_csv_to_xlsx.py -i ./exports --decode-encoded
+```
+
+Adds a `DecodedCommand` column immediately after the `CommandLine` column on any
+sheet where at least one row contains a PowerShell `-EncodedCommand` (or `-enc`,
+`-en`, `-e`) payload. The base64/UTF-16-LE blob is decoded to plain text so you
+can read the script without a separate decoding step. Rows without an encoded
+command get an empty cell. Sheets with no encoded commands are not changed.
+
+---
+
+### Extract IOCs to a dedicated sheet
+
+```bash
+python edr_csv_to_xlsx.py -i ./exports --ioc-extract
+```
+
+Scans all loaded CSVs for hash and IP address values and writes a deduplicated
+**IOC_Extract** sheet (orange tab) as the first sheet in the workbook. Columns:
+`Type`, `Value`, `SourceSheets`, `Count`.
+
+Supported IOC types:
+
+| Type | Detection |
+|---|---|
+| SHA256 | 64-char hex string in any column whose name hints at a hash |
+| SHA1 | 40-char hex string in a hash-hinted column |
+| MD5 | 32-char hex string in a hash-hinted column |
+| IPv4 | Valid IPv4 address in a column hinted at remote/local/destination IPs |
+
+Loopback (`127.0.0.1`), unspecified (`0.0.0.0`), and broadcast addresses are
+excluded automatically. If no IOC columns are found, the sheet is not created.
+
+---
+
+### Filter to specific columns
+
+```bash
+python edr_csv_to_xlsx.py -i ./exports --columns "Timestamp,ImageFileName,CommandLine,SHA256"
+```
+
+Only the named columns are written to each data sheet. Columns that don't exist
+in a particular CSV are silently skipped. If no columns match, the full
+DataFrame is kept unchanged. This is useful for reducing workbook size when you
+only care about a subset of EDR fields.
+
+---
+
+### Cap row count per sheet
+
+```bash
+python edr_csv_to_xlsx.py -i ./exports --max-rows 5000
+```
+
+Truncates each data sheet to the first N rows after loading. Useful when a single
+CSV is too large for comfortable Excel navigation. A warning is logged for any
+sheet that was truncated.
+
+---
+
+### Extend the LOLBin watchlist
+
+```bash
+python edr_csv_to_xlsx.py -i ./exports --highlight
+```
+
+The built-in LOLBin set (47 entries, sourced from the
+[LOLBAS project](https://lolbas-project.github.io)) can be extended via the
+config file without editing source code:
+
+```ini
+# .edr-workbook-builder.ini  (local) or ~/.config/edr-workbook-builder/config.ini (global)
+[watchlist]
+extra_lolbins = customtool, internal_runner, deploy_helper
+```
+
+The extra stems are merged with the baseline set at startup and apply to all
+`--highlight` and `--summary` suspicious pattern checks.
 
 ---
 
@@ -181,6 +286,10 @@ python edr_csv_to_xlsx.py \
   --highlight \
   --attck \
   --process-tree \
+  --decode-encoded \
+  --ioc-extract \
+  --columns "Timestamp,ImageFileName,CommandLine,SHA256,RemoteIP" \
+  --max-rows 10000 \
   --escape-formulas \
   --recursive \
   --add-source-column \
@@ -201,15 +310,19 @@ python edr_csv_to_xlsx.py --input ./exports --dry-run
 
 | Argument | Short | Description |
 |---|---|---|
-| `--input FOLDER` | `-i` | **Required.** Folder containing CSV files |
+| `--input FOLDER` | `-i` | **Required.** Folder containing CSV files. Repeat for multiple folders. |
 | `--output FILE` | `-o` | Output `.xlsx` path (default: `edr_analysis_<timestamp>.xlsx`) |
 | `--case-name NAME` | | Case or alert name — shown in filename and summary sheet |
 | `--summary` / `--no-summary` | | Add `Analysis_Summary` as the first worksheet |
 | `--timeline` / `--no-timeline` | | Add a Timeline sheet: all events merged and sorted chronologically |
 | `--highlight` / `--no-highlight` | | Color-code suspicious rows (LOLBin, obfuscation, encoded commands) |
 | `--escape-formulas` / `--no-escape-formulas` | | Prefix `=`/`+`/`-`/`@` cell values with `'` to prevent formula injection |
-| `--attck` / `--no-attck` | | Add an `ATT&CK` column with MITRE technique IDs to each data sheet |
+| `--attck` / `--no-attck` | | Add an `ATT&CK` column with MITRE technique IDs and names to each data sheet |
 | `--process-tree` / `--no-process-tree` | | Add a ProcessTree sheet (purple tab) from ProcessId/ParentProcessId columns |
+| `--decode-encoded` / `--no-decode-encoded` | | Add a `DecodedCommand` column decoding PowerShell -EncodedCommand blobs |
+| `--ioc-extract` / `--no-ioc-extract` | | Add an IOC_Extract sheet (orange tab) with deduplicated hashes and IPs |
+| `--columns COLS` | | Comma-separated list of columns to include in data sheets |
+| `--max-rows N` | | Truncate each data sheet to the first N rows |
 | `--recursive` / `--no-recursive` | `-r` | Search subfolders for CSV files |
 | `--add-source-column` / `--no-add-source-column` | | Prepend a `SourceFile` column to each worksheet |
 | `--config FILE` | | Load additional config from FILE (overrides global and local config) |
@@ -330,10 +443,13 @@ pytest
 ```
 
 Tests cover: sheet name sanitization and deduplication, process name detection
-from all supported column types, CSV loading with encoding fallback, edge cases
-(empty files, header-only files, duplicate sheet names, quoted paths), suspicious
-pattern detection, timeline building, MITRE ATT&CK tagging, process tree
-construction, and config file loading/saving.
+from all supported column types, CSV loading with encoding fallback and parallel
+loading, edge cases (empty files, header-only files, duplicate sheet names,
+quoted paths), suspicious pattern detection (LOLBin, base64, hex blobs),
+PowerShell -EncodedCommand decoding, configurable LOLBin watchlist, MITRE ATT&CK
+tagging with human-readable technique names, process tree construction and PID
+recycling, IOC extraction and deduplication, config file loading/saving, and
+full integration tests that build real `.xlsx` files and inspect them.
 
 ---
 
@@ -349,15 +465,16 @@ edr-workbook-builder/
 │   ├── __main__.py              # python -m edr_workbook_builder
 │   ├── cli.py                   # Argument parsing and orchestration
 │   ├── config.py                # INI config file loading and saving
-│   ├── csv_loader.py            # CSV discovery and multi-encoding load
+│   ├── csv_loader.py            # CSV discovery, multi-encoding load, parallel loading
 │   ├── process_detection.py     # Extract process name from EDR columns
 │   ├── sheet_names.py           # Excel sheet name sanitization/dedup
 │   ├── workbook.py              # Workbook and worksheet formatting
 │   ├── summary.py               # Analysis_Summary sheet builder
-│   ├── patterns.py              # LOLBin / obfuscation suspicious pattern detection
+│   ├── patterns.py              # LOLBin/obfuscation detection, PS decode, configurable watchlist
 │   ├── timeline.py              # Timeline sheet: merged, chronologically sorted
-│   ├── attck.py                 # MITRE ATT&CK technique tagging
-│   └── proctree.py              # Process tree reconstruction (DFS)
+│   ├── attck.py                 # MITRE ATT&CK technique tagging with human-readable names
+│   ├── proctree.py              # Process tree reconstruction (DFS, PID recycling aware)
+│   └── ioc_extract.py           # IOC extraction: hashes, IPs, deduplicated output
 ├── tests/
 │   ├── test_sheet_names.py
 │   ├── test_process_detection.py
@@ -367,7 +484,10 @@ edr-workbook-builder/
 │   ├── test_timeline.py
 │   ├── test_attck.py
 │   ├── test_proctree.py
-│   └── test_config.py
+│   ├── test_config.py
+│   ├── test_decode_and_lolbins.py
+│   ├── test_ioc_extract.py
+│   └── test_integration.py
 └── examples/
     └── sample_exports/
 ```
@@ -383,6 +503,7 @@ edr-workbook-builder/
 | **argparse** | Standard library — zero extra dependency, easy for a security team to audit, works everywhere Python is installed |
 | **pathlib** | Cross-platform path handling with no extra dependency |
 | **logging** | Standard library structured logging with configurable verbosity |
+| **concurrent.futures** | Standard library thread pool for parallel CSV loading — no extra dependency, safe for I/O-bound work |
 
 ---
 
@@ -394,7 +515,8 @@ edr-workbook-builder/
 | **v0.2** | Better summary: column inventory matrix, parent/child process relationship table |
 | **v0.3** | Suspicious pattern highlighting: LOLBin flagging, base64/encoded command detection, `--escape-formulas` |
 | **v0.4** | Timeline sheet: all events merged and sorted chronologically by detected timestamp column |
-| **v1.0** (current) | Config file (`--save-config`), MITRE ATT&CK column tagging (`--attck`), process tree reconstruction (`--process-tree`) |
+| **v1.0** | Config file (`--save-config`), MITRE ATT&CK column tagging (`--attck`), process tree reconstruction (`--process-tree`) |
+| **v1.1** (current) | ATT&CK technique names, PowerShell decode (`--decode-encoded`), IOC extraction (`--ioc-extract`), parallel CSV loading, column filter (`--columns`), row cap (`--max-rows`), multiple `--input` folders, configurable LOLBin watchlist, PID recycling fix |
 
 ---
 

@@ -119,6 +119,54 @@ _CMDLINE_PATTERNS: list[tuple[re.Pattern, list[str]]] = [
     (re.compile(r"(?:Compress-Archive|Expand-Archive|\b7z\b)\b", re.I),        ["T1560"]),
 ]
 
+# Human-readable name for each technique ID.
+TECHNIQUE_NAMES: dict[str, str] = {
+    "T1003.001": "LSASS Memory",
+    "T1021.002": "SMB/Windows Admin Shares",
+    "T1021.004": "SSH",
+    "T1027":     "Obfuscated Files or Information",
+    "T1033":     "System Owner/User Discovery",
+    "T1046":     "Network Service Discovery",
+    "T1047":     "Windows Management Instrumentation",
+    "T1048":     "Exfiltration Over Alt Protocol",
+    "T1049":     "System Network Connections Discovery",
+    "T1053.005": "Scheduled Task",
+    "T1057":     "Process Discovery",
+    "T1059.001": "PowerShell",
+    "T1059.003": "Windows Command Shell",
+    "T1059.004": "Unix Shell",
+    "T1059.005": "Visual Basic",
+    "T1059.006": "Python",
+    "T1082":     "System Information Discovery",
+    "T1087":     "Account Discovery",
+    "T1087.002": "Domain Account Discovery",
+    "T1105":     "Ingress Tool Transfer",
+    "T1112":     "Modify Registry",
+    "T1136.001": "Create Local Account",
+    "T1140":     "Deobfuscate/Decode Files",
+    "T1197":     "BITS Jobs",
+    "T1016":     "System Network Config Discovery",
+    "T1018":     "Remote System Discovery",
+    "T1482":     "Domain Trust Discovery",
+    "T1489":     "Service Stop",
+    "T1490":     "Inhibit System Recovery",
+    "T1543.003": "Windows Service",
+    "T1547.001": "Registry Run Keys",
+    "T1560":     "Archive Collected Data",
+    "T1562.001": "Disable or Modify Tools",
+    "T1564.003": "Hidden Window",
+    "T1218":     "Signed Binary Proxy Execution",
+    "T1218.003": "CMSTP",
+    "T1218.004": "InstallUtil",
+    "T1218.005": "Mshta",
+    "T1218.007": "Msiexec",
+    "T1218.008": "Odbcconf",
+    "T1218.009": "Regsvcs/Regasm",
+    "T1218.010": "Regsvr32",
+    "T1218.011": "Rundll32",
+    "T1218.013": "Mavinject",
+}
+
 # EDR process name columns — checked case-insensitively in priority order.
 _EXE_COLS = [
     "imagefilename", "filename", "processname",
@@ -126,6 +174,12 @@ _EXE_COLS = [
 ]
 # EDR command-line columns.
 _CMD_COLS = ["commandline"]
+
+
+def format_technique(tid: str) -> str:
+    """Return 'T1059.001 (PowerShell)' style label, or just the ID if unnamed."""
+    name = TECHNIQUE_NAMES.get(tid)
+    return f"{tid} ({name})" if name else tid
 
 
 def tag_attck(process_exe: str, commandline: str = "") -> list[str]:
@@ -200,7 +254,7 @@ def add_attck_column(
         exe = str(row[process_col]) if process_col and process_col in row.index else ""
         cmd = str(row[cmdline_col]) if cmdline_col and cmdline_col in row.index else ""
         techs = tag_attck(exe, cmd)
-        return ", ".join(techs) if techs else ""
+        return ", ".join(format_technique(t) for t in techs) if techs else ""
 
     attck_values = df.apply(_tag_row, axis=1)
 

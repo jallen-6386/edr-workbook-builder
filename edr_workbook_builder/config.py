@@ -33,13 +33,20 @@ _DEFAULTS: dict[str, dict[str, str]] = {
         "add_source_column": "false",
         "attck":             "false",
         "process_tree":      "false",
+        "decode_encoded":    "false",
+        "ioc_extract":       "false",
     },
     "analyst": {
         "name": "",
     },
+    "watchlist": {
+        # Comma-separated exe stems to add to the LOLBin detection set.
+        # Example: extra_lolbins = myinternaltool, vendortool
+        "extra_lolbins": "",
+    },
 }
 
-# Boolean flags that can be set via config.
+# Boolean flags managed by apply_config_defaults / save_config.
 BOOL_FLAGS: frozenset[str] = frozenset(_DEFAULTS[_SECTION])
 
 
@@ -79,6 +86,19 @@ def apply_config_defaults(args, cfg: configparser.ConfigParser) -> None:
     for flag in BOOL_FLAGS:
         if getattr(args, flag, None) is None:
             setattr(args, flag, False)
+
+
+def get_extra_lolbins(cfg: configparser.ConfigParser) -> list[str]:
+    """
+    Return the list of extra LOLBin stems from the [watchlist] section.
+
+    Values are comma-separated in the config; empty strings are dropped.
+    """
+    try:
+        raw = cfg.get("watchlist", "extra_lolbins")
+    except (configparser.NoSectionError, configparser.NoOptionError):
+        return []
+    return [s.strip() for s in raw.split(",") if s.strip()]
 
 
 def save_config(args, path: Optional[Path] = None) -> Path:

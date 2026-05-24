@@ -11,6 +11,8 @@ Used by workbook.py to highlight suspicious rows and by summary.py to
 populate the Suspicious Activity section.
 """
 
+import base64
+import logging
 import re
 from dataclasses import dataclass, field
 from typing import Optional
@@ -18,6 +20,8 @@ from typing import Optional
 import pandas as pd
 
 from edr_workbook_builder.process_detection import extract_exe_name
+
+logger = logging.getLogger(__name__)
 
 # Known LOLBins — exe stems, lowercase.
 # Core set sourced from LOLBAS project (lolbas-project.github.io).
@@ -80,9 +84,28 @@ class RowFinding:
     severity: int          # highest severity across all matches for this row
 
 
+# Runtime-configurable set — starts as the baseline LOLBINS and can be
+# extended at startup via configure_lolbins() without changing the source.
+_effective_lolbins: frozenset[str] = LOLBINS
+
+
+def configure_lolbins(extra: list[str]) -> None:
+    """
+    Extend the LOLBin detection set with additional exe stems.
+
+    Call once at startup (e.g. from cli.py after reading config).
+    Stems are lower-cased and stripped before being added.
+    """
+    global _effective_lolbins
+    cleaned = frozenset(e.strip().lower() for e in extra if e.strip())
+    _effective_lolbins = LOLBINS | cleaned
+    if cleaned:
+        logger.debug("Extra LOLBins configured: %s", ", ".join(sorted(cleaned)))
+
+
 def is_lolbin(process_name: str) -> bool:
-    """Return True if the exe stem is a known LOLBin."""
-    return process_name.lower() in LOLBINS
+    """Return True if the exe stem is in the effective LOLBin set."""
+    return process_name.lower() in _effective_lolbins
 
 
 def check_commandline(value: str) -> Optional[SuspiciousMatch]:
@@ -146,3 +169,54 @@ def check_row(row_data: pd.Series) -> list[SuspiciousMatch]:
 def max_severity(matches: list[SuspiciousMatch]) -> int:
     """Return the highest severity across a list of matches, or 0 if empty."""
     return max((m.severity for m in matches), default=0)
+
+
+def decode_ps_commandline(value: str) -> Optional[str]:
+    """
+    Decode a PowerShell -EncodedCommand base64 blob to plain text.
+
+    Returns the decoded UTF-16-LE string when a match is found, or None.
+    Non-printable characters other than tabs and newlines are replaced with
+    a Unicode replacement character so the result is always safe to write
+    to a cell.
+    """
+    if not value or not isinstance(value, str):
+        return None
+    m = _PS_ENCODE_RE.search(value)
+    if not m:
+        return None
+    b64 = m.group(1)
+    # Pad to a multiple of 4 if needed.
+    remainder = len(b64) % 4
+    if remainder:
+        b64 += "=" * (4 - remainder)
+    try:
+        raw = base64.b64decode(b64)
+        text = raw.decode("utf-16-le", errors="replace").strip("\x00").strip()
+        return text if text else None
+    except Exception:
+        return None
+
+
+def add_decoded_column(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Return a copy of *df* with a 'DecodedCommand' column inserted after
+    the CommandLine column when at least one row contains an encoded command.
+
+    Rows without an encoded command get an empty string.  The column is
+    omitted entirely when no encoded commands are found in the sheet.
+    """
+    df = df.copy()
+    cols_lower = {c.lower(): c for c in df.columns}
+    cmd_col = cols_lower.get("commandline")
+    if cmd_col is None:
+        return df
+
+    decoded = df[cmd_col].apply(lambda v: decode_ps_commandline(str(v)) or "")
+
+    if not decoded.any():
+        return df
+
+    insert_at = df.columns.get_loc(cmd_col) + 1
+    df.insert(insert_at, "DecodedCommand", decoded)
+    return df

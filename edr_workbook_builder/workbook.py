@@ -50,6 +50,7 @@ class WorkbookResult:
     timeline_excluded: list[str] = field(default_factory=list)
     timeline_timestamp_col: Optional[str] = None
     process_tree_node_count: int = 0
+    ioc_count: int = 0
 
 logger = logging.getLogger(__name__)
 
@@ -174,6 +175,10 @@ def build_workbook(
     add_timeline: bool = False,
     add_attck: bool = False,
     add_process_tree: bool = False,
+    decode_encoded: bool = False,
+    add_ioc_sheet: bool = False,
+    columns_filter: Optional[list[str]] = None,
+    max_rows: Optional[int] = None,
 ) -> WorkbookResult:
     """Assemble and save the Excel workbook from loaded CSV results.
 
@@ -194,9 +199,27 @@ def build_workbook(
             continue
 
         df = result.dataframe
+
+        # Column filter — applied before any augmentation so feature columns
+        # (ATT&CK, DecodedCommand) are added on top of the filtered set.
+        if columns_filter:
+            keep = [c for c in df.columns if c in columns_filter]
+            df = df[keep] if keep else df
+
+        # Row cap.
+        if max_rows is not None and len(df) > max_rows:
+            logger.warning(
+                "Sheet '%s': truncated to %d rows (had %d)", sheet_name, max_rows, len(df)
+            )
+            df = df.iloc[:max_rows]
+
         if add_attck:
             from edr_workbook_builder.attck import add_attck_column
             df = add_attck_column(df)
+
+        if decode_encoded:
+            from edr_workbook_builder.patterns import add_decoded_column
+            df = add_decoded_column(df)
 
         ws = wb.create_sheet(title=sheet_name)
         sheet_findings = write_dataframe_to_sheet(
@@ -226,10 +249,24 @@ def build_workbook(
         ws["A1"] = "No CSV files could be processed. Run with --verbose for details."
         ws["A1"].font = Font(name="Calibri", bold=True, color="C00000")
 
+    result = WorkbookResult(findings=all_findings)
+
+    # IOC Extract sheet — orange tab, inserted at index 0.
+    if add_ioc_sheet:
+        from edr_workbook_builder.ioc_extract import extract_iocs
+        ioc_df = extract_iocs(load_results, sheet_names)
+        if not ioc_df.empty:
+            ws_ioc = wb.create_sheet(title="IOC_Extract", index=0)
+            ws_ioc.sheet_properties.tabColor = "ED7D31"  # orange tab
+            write_dataframe_to_sheet(ws_ioc, ioc_df)
+            result.ioc_count = len(ioc_df)
+            logger.info("IOC_Extract: %d unique indicator(s) written", len(ioc_df))
+        else:
+            logger.warning("IOC_Extract: no hash or IP columns found — sheet not created")
+
     # ProcessTree sheet — inserted at index 0.
     # Timeline (if requested) is then inserted at index 0, pushing ProcessTree to 1.
     # Summary (if requested) is inserted at index 0 last, pushing all others down.
-    result = WorkbookResult(findings=all_findings)
     if add_process_tree:
         from edr_workbook_builder.proctree import build_process_tree_rows
         tree_rows = build_process_tree_rows(load_results, sheet_names)

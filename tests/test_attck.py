@@ -112,6 +112,12 @@ class TestAddAttckColumn:
         val = out["ATT&CK"].iloc[0]
         assert "," in val  # multiple techniques joined
 
+    def test_cell_value_includes_technique_name(self):
+        df = self._make_df(ImageFileName="powershell.exe", CommandLine="")
+        out = add_attck_column(df)
+        val = out["ATT&CK"].iloc[0]
+        assert "PowerShell" in val
+
     def test_original_df_not_mutated(self):
         df = self._make_df(ImageFileName="powershell.exe", CommandLine="")
         _ = add_attck_column(df)

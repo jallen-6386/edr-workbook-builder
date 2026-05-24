@@ -6,6 +6,7 @@ without pandas type coercion changing timestamps, hashes, or PID values.
 """
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -76,17 +77,35 @@ def load_csv(path: Path) -> CSVLoadResult:
     )
 
 
-def load_all_csvs(paths: list[Path]) -> list[CSVLoadResult]:
-    results = []
-    for path in paths:
-        logger.debug("Loading: %s", path.name)
-        result = load_csv(path)
-        if result.error:
-            logger.warning("Could not load %s: %s", path.name, result.error)
-        else:
-            logger.debug(
-                "Loaded %s — %d rows, %d columns (encoding: %s)",
-                path.name, result.row_count, result.col_count, result.encoding_used,
-            )
-        results.append(result)
-    return results
+def _load_and_log(path: Path) -> CSVLoadResult:
+    logger.debug("Loading: %s", path.name)
+    result = load_csv(path)
+    if result.error:
+        logger.warning("Could not load %s: %s", path.name, result.error)
+    else:
+        logger.debug(
+            "Loaded %s — %d rows, %d columns (encoding: %s)",
+            path.name, result.row_count, result.col_count, result.encoding_used,
+        )
+    return result
+
+
+def load_all_csvs(paths: list[Path], max_workers: int = 8) -> list[CSVLoadResult]:
+    """Load all CSVs, in parallel when there are multiple files.
+
+    Results are returned in the same order as *paths* regardless of
+    which file finishes first.  The worker cap prevents thread storms
+    on very large file lists.
+    """
+    if not paths:
+        return []
+    if len(paths) == 1:
+        return [_load_and_log(paths[0])]
+
+    results: list[Optional[CSVLoadResult]] = [None] * len(paths)
+    workers = min(max_workers, len(paths))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        future_to_idx = {pool.submit(_load_and_log, p): i for i, p in enumerate(paths)}
+        for future in as_completed(future_to_idx):
+            results[future_to_idx[future]] = future.result()
+    return results  # type: ignore[return-value]
