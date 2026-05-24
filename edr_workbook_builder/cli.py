@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Optional
 
 from edr_workbook_builder import __version__
+from edr_workbook_builder.config import apply_config_defaults, load_config, save_config
 from edr_workbook_builder.csv_loader import find_csv_files, load_all_csvs
 from edr_workbook_builder.process_detection import detect_process_name
 from edr_workbook_builder.sheet_names import make_unique_sheet_names
@@ -42,6 +43,7 @@ def _default_output_path(case_name: Optional[str], timestamp: datetime) -> Path:
 
 
 def _build_parser() -> argparse.ArgumentParser:
+    boa = argparse.BooleanOptionalAction
     parser = argparse.ArgumentParser(
         prog="edr-workbook-builder",
         description=(
@@ -54,10 +56,12 @@ examples:
   python edr_csv_to_xlsx.py -i ./crowdstrike_exports
   python edr_csv_to_xlsx.py -i ./exports -o ./case123_edr.xlsx
   python edr_csv_to_xlsx.py -i ./exports --case-name "Suspicious PowerShell" --summary
-  python edr_csv_to_xlsx.py -i ./exports --summary --highlight
+  python edr_csv_to_xlsx.py -i ./exports --summary --highlight --attck
   python edr_csv_to_xlsx.py -i ./exports --highlight --escape-formulas
+  python edr_csv_to_xlsx.py -i ./exports --process-tree --timeline --summary
   python edr_csv_to_xlsx.py -i ./exports --recursive --summary --verbose
   python edr_csv_to_xlsx.py -i ./exports --dry-run
+  python edr_csv_to_xlsx.py -i ./exports --summary --save-config
         """,
     )
     parser.add_argument("--version", "-V", action="version", version=f"%(prog)s {__version__}")
@@ -74,26 +78,34 @@ examples:
         help="Case or alert name — embedded in the filename and the summary sheet",
     )
     parser.add_argument(
-        "--summary", action="store_true",
+        "--config", metavar="FILE",
+        help="Path to a config file (overrides global and local config)",
+    )
+    parser.add_argument(
+        "--save-config", action="store_true",
+        help="Save current flag values to .edr-workbook-builder.ini in the current directory",
+    )
+    parser.add_argument(
+        "--summary", action=boa, default=None,
         help="Add an Analysis_Summary sheet as the first worksheet",
     )
     parser.add_argument(
-        "-r", "--recursive", action="store_true",
+        "-r", "--recursive", action=boa, default=None,
         help="Search subfolders recursively for CSV files",
     )
     parser.add_argument(
-        "--add-source-column", action="store_true",
+        "--add-source-column", action=boa, default=None,
         help="Prepend a SourceFile column showing the origin CSV on each worksheet",
     )
     parser.add_argument(
-        "--timeline", action="store_true",
+        "--timeline", action=boa, default=None,
         help=(
             "Add a Timeline sheet: all events from every CSV merged and sorted "
             "chronologically on the best shared timestamp column"
         ),
     )
     parser.add_argument(
-        "--highlight", action="store_true",
+        "--highlight", action=boa, default=None,
         help=(
             "Highlight suspicious rows in each data sheet: "
             "yellow = LOLBin process, salmon = possible obfuscation, "
@@ -101,10 +113,24 @@ examples:
         ),
     )
     parser.add_argument(
-        "--escape-formulas", action="store_true",
+        "--escape-formulas", action=boa, default=None,
         help=(
             "Prefix cell values starting with =, +, -, or @ with a single quote "
             "to prevent accidental formula execution when opening in Excel"
+        ),
+    )
+    parser.add_argument(
+        "--attck", action=boa, default=None,
+        help=(
+            "Add an ATT&CK column to each data sheet with MITRE technique IDs "
+            "derived from the process name and command-line arguments"
+        ),
+    )
+    parser.add_argument(
+        "--process-tree", action=boa, default=None,
+        help=(
+            "Add a ProcessTree sheet reconstructed from ProcessId / ParentProcessId "
+            "columns across all CSVs (purple tab)"
         ),
     )
     parser.add_argument(
@@ -122,6 +148,16 @@ def main() -> int:
     parser = _build_parser()
     args = parser.parse_args()
     _setup_logging(args.verbose)
+
+    # Load config and fill in any unset boolean flags.
+    config_path = Path(args.config) if args.config else None
+    cfg = load_config(extra_path=config_path)
+    apply_config_defaults(args, cfg)
+
+    # Save config before doing any work so the file reflects the resolved flags.
+    if args.save_config:
+        saved = save_config(args)
+        logger.info("Flags saved to: %s", saved)
 
     timestamp = datetime.now()
 
@@ -174,6 +210,10 @@ def main() -> int:
             flags.append("--highlight")
         if args.escape_formulas:
             flags.append("--escape-formulas")
+        if args.attck:
+            flags.append("--attck")
+        if args.process_tree:
+            flags.append("--process-tree")
         if flags:
             print(f"[DRY RUN] Flags:   {' '.join(flags)}")
         print(f"\n[DRY RUN] {len(csv_files)} file(s) would be processed:")
@@ -232,6 +272,8 @@ def main() -> int:
             highlight_suspicious=args.highlight,
             escape_formulas=args.escape_formulas,
             add_timeline=args.timeline,
+            add_attck=args.attck,
+            add_process_tree=args.process_tree,
         )
     except Exception as exc:
         logger.error("Failed to create workbook: %s", exc)
@@ -287,6 +329,15 @@ def main() -> int:
 
     if args.escape_formulas:
         print("  Formulas:   formula-injection escaping applied")
+
+    if args.attck:
+        print("  ATT&CK:     technique column added to each data sheet")
+
+    if args.process_tree:
+        if wb_result.process_tree_node_count:
+            print(f"  ProcessTree: {wb_result.process_tree_node_count} node(s) written (purple tab)")
+        else:
+            print("  ProcessTree: no ProcessId/ParentProcessId columns found — sheet not created")
 
     return 0
 

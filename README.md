@@ -126,6 +126,49 @@ does not interpret them as formulas when the workbook is opened.
 
 ---
 
+### Tag rows with MITRE ATT&CK techniques
+
+```bash
+python edr_csv_to_xlsx.py -i ./exports --attck
+```
+
+Adds an `ATT&CK` column to each data sheet immediately after the detected process
+name column. Technique IDs are derived from both the process executable name
+(e.g., `powershell.exe` → `T1059.001`) and command-line patterns (e.g.,
+`-EncodedCommand` → `T1027`, `-WindowStyle Hidden` → `T1564.003`). Multiple
+matching techniques are comma-separated in the same cell.
+
+---
+
+### Reconstruct the process tree
+
+```bash
+python edr_csv_to_xlsx.py -i ./exports --process-tree
+```
+
+Adds a **ProcessTree** sheet (purple tab) built from `ProcessId` /
+`ParentProcessId` columns across all CSVs. Displays parent → child relationships
+with `├─` / `└─` tree characters. Columns: `Process`, `PID`, `PPID`,
+`CommandLine`, `SourceSheet`. Capped at 500 nodes; cycles are skipped.
+
+---
+
+### Save default flags to a config file
+
+```bash
+python edr_csv_to_xlsx.py -i ./exports --summary --highlight --attck --save-config
+```
+
+Writes the current flag values to `.edr-workbook-builder.ini` in the current
+directory. Subsequent runs in the same directory pick up those defaults
+automatically, so you don't have to retype `--summary --highlight --attck`
+every time. Use `--no-summary` (etc.) to override a saved default for one run.
+
+A global default config can also be placed at
+`~/.config/edr-workbook-builder/config.ini`.
+
+---
+
 ### Full options
 
 ```bash
@@ -136,6 +179,8 @@ python edr_csv_to_xlsx.py \
   --summary \
   --timeline \
   --highlight \
+  --attck \
+  --process-tree \
   --escape-formulas \
   --recursive \
   --add-source-column \
@@ -159,12 +204,16 @@ python edr_csv_to_xlsx.py --input ./exports --dry-run
 | `--input FOLDER` | `-i` | **Required.** Folder containing CSV files |
 | `--output FILE` | `-o` | Output `.xlsx` path (default: `edr_analysis_<timestamp>.xlsx`) |
 | `--case-name NAME` | | Case or alert name — shown in filename and summary sheet |
-| `--summary` | | Add `Analysis_Summary` as the first worksheet |
-| `--timeline` | | Add a Timeline sheet: all events merged and sorted chronologically |
-| `--highlight` | | Color-code suspicious rows (LOLBin, obfuscation, encoded commands) |
-| `--escape-formulas` | | Prefix `=`/`+`/`-`/`@` cell values with `'` to prevent formula injection |
-| `--recursive` | `-r` | Search subfolders for CSV files |
-| `--add-source-column` | | Prepend a `SourceFile` column to each worksheet |
+| `--summary` / `--no-summary` | | Add `Analysis_Summary` as the first worksheet |
+| `--timeline` / `--no-timeline` | | Add a Timeline sheet: all events merged and sorted chronologically |
+| `--highlight` / `--no-highlight` | | Color-code suspicious rows (LOLBin, obfuscation, encoded commands) |
+| `--escape-formulas` / `--no-escape-formulas` | | Prefix `=`/`+`/`-`/`@` cell values with `'` to prevent formula injection |
+| `--attck` / `--no-attck` | | Add an `ATT&CK` column with MITRE technique IDs to each data sheet |
+| `--process-tree` / `--no-process-tree` | | Add a ProcessTree sheet (purple tab) from ProcessId/ParentProcessId columns |
+| `--recursive` / `--no-recursive` | `-r` | Search subfolders for CSV files |
+| `--add-source-column` / `--no-add-source-column` | | Prepend a `SourceFile` column to each worksheet |
+| `--config FILE` | | Load additional config from FILE (overrides global and local config) |
+| `--save-config` | | Save current flag values to `.edr-workbook-builder.ini` |
 | `--verbose` | `-v` | Debug-level logging |
 | `--dry-run` | | Show what would happen without writing output |
 | `--version` | `-V` | Print version and exit |
@@ -281,8 +330,10 @@ pytest
 ```
 
 Tests cover: sheet name sanitization and deduplication, process name detection
-from all supported column types, CSV loading with encoding fallback, and edge
-cases (empty files, header-only files, duplicate sheet names, quoted paths).
+from all supported column types, CSV loading with encoding fallback, edge cases
+(empty files, header-only files, duplicate sheet names, quoted paths), suspicious
+pattern detection, timeline building, MITRE ATT&CK tagging, process tree
+construction, and config file loading/saving.
 
 ---
 
@@ -297,15 +348,26 @@ edr-workbook-builder/
 │   ├── __init__.py              # Package version
 │   ├── __main__.py              # python -m edr_workbook_builder
 │   ├── cli.py                   # Argument parsing and orchestration
+│   ├── config.py                # INI config file loading and saving
 │   ├── csv_loader.py            # CSV discovery and multi-encoding load
 │   ├── process_detection.py     # Extract process name from EDR columns
 │   ├── sheet_names.py           # Excel sheet name sanitization/dedup
 │   ├── workbook.py              # Workbook and worksheet formatting
-│   └── summary.py              # Analysis_Summary sheet builder
+│   ├── summary.py               # Analysis_Summary sheet builder
+│   ├── patterns.py              # LOLBin / obfuscation suspicious pattern detection
+│   ├── timeline.py              # Timeline sheet: merged, chronologically sorted
+│   ├── attck.py                 # MITRE ATT&CK technique tagging
+│   └── proctree.py              # Process tree reconstruction (DFS)
 ├── tests/
 │   ├── test_sheet_names.py
 │   ├── test_process_detection.py
-│   └── test_csv_loader.py
+│   ├── test_csv_loader.py
+│   ├── test_patterns.py
+│   ├── test_summary_helpers.py
+│   ├── test_timeline.py
+│   ├── test_attck.py
+│   ├── test_proctree.py
+│   └── test_config.py
 └── examples/
     └── sample_exports/
 ```
@@ -331,28 +393,23 @@ edr-workbook-builder/
 | **v0.1** | MVP: folder → workbook, process detection, safe sheet names, optional summary sheet |
 | **v0.2** | Better summary: column inventory matrix, parent/child process relationship table |
 | **v0.3** | Suspicious pattern highlighting: LOLBin flagging, base64/encoded command detection, `--escape-formulas` |
-| **v0.4** (current) | Timeline sheet: all events merged and sorted chronologically by detected timestamp column |
-| **v1.0** | Polished internal SOC utility: config file, MITRE ATT&CK column tagging, process tree reconstruction |
+| **v0.4** | Timeline sheet: all events merged and sorted chronologically by detected timestamp column |
+| **v1.0** (current) | Config file (`--save-config`), MITRE ATT&CK column tagging (`--attck`), process tree reconstruction (`--process-tree`) |
 
 ---
 
 ## Future enhancement ideas
 
-- **Process tree reconstruction** — if `ParentProcessId` and `ProcessId` columns
-  exist, build a visual tree in a dedicated sheet
-- **LOLBin detection** — flag rows where the process is a known Living-off-the-Land binary
-- **Base64 / encoded command detection** — regex scan of CommandLine fields
-- **Timeline sheet** — merge all CSVs on a timestamp column, sorted chronologically
-- **MITRE ATT&CK mapping** — tag events with likely technique IDs based on
-  process name and command-line patterns
 - **CrowdStrike Falcon API integration** — pull exports directly via API instead
   of requiring manual CSV downloads
 - **Splunk / Google SecOps CSV support** — extend process detection for alternate
   EDR export formats
 - **Simple GUI / drag-and-drop** — Tkinter or a small web UI for analysts who
   prefer not to use the terminal
-- **`--escape-formulas` flag** — prefix `=`/`+`/`-` cells with `'` to prevent
-  accidental formula execution
+- **MITRE ATT&CK sheet** — dedicated worksheet with all technique hits aggregated
+  across every CSV, with technique descriptions and external links
+- **Sigma rule matching** — scan CommandLine fields against a local Sigma rule set
+  and annotate matching rows
 
 ---
 

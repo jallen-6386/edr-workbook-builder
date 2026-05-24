@@ -330,7 +330,7 @@ def create_summary_sheet(
     row = _section(ws, row, "CASE INFORMATION")
     row = _kv(ws, row, "Case / Alert:", case_name or "(not provided)")
     row = _kv(ws, row, "Generated:", timestamp.strftime("%Y-%m-%d %H:%M:%S"))
-    row = _kv(ws, row, "Tool:", "EDR Workbook Builder v0.4.0")
+    row = _kv(ws, row, "Tool:", "EDR Workbook Builder v1.0.0")
     row += 1
 
     row = _section(ws, row, "PROCESSING STATISTICS")

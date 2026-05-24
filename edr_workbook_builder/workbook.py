@@ -49,6 +49,7 @@ class WorkbookResult:
     timeline_included: list[str] = field(default_factory=list)
     timeline_excluded: list[str] = field(default_factory=list)
     timeline_timestamp_col: Optional[str] = None
+    process_tree_node_count: int = 0
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +172,8 @@ def build_workbook(
     highlight_suspicious: bool = False,
     escape_formulas: bool = False,
     add_timeline: bool = False,
+    add_attck: bool = False,
+    add_process_tree: bool = False,
 ) -> WorkbookResult:
     """Assemble and save the Excel workbook from loaded CSV results.
 
@@ -190,10 +193,15 @@ def build_workbook(
         if result.error or result.dataframe is None:
             continue
 
+        df = result.dataframe
+        if add_attck:
+            from edr_workbook_builder.attck import add_attck_column
+            df = add_attck_column(df)
+
         ws = wb.create_sheet(title=sheet_name)
         sheet_findings = write_dataframe_to_sheet(
             ws,
-            result.dataframe,
+            df,
             add_source=add_source_column,
             source_name=result.path.name,
             highlight_suspicious=highlight_suspicious,
@@ -218,8 +226,26 @@ def build_workbook(
         ws["A1"] = "No CSV files could be processed. Run with --verbose for details."
         ws["A1"].font = Font(name="Calibri", bold=True, color="C00000")
 
-    # Timeline sheet — inserted at index 0, pushed to index 1 when summary is added.
+    # ProcessTree sheet — inserted at index 0.
+    # Timeline (if requested) is then inserted at index 0, pushing ProcessTree to 1.
+    # Summary (if requested) is inserted at index 0 last, pushing all others down.
     result = WorkbookResult(findings=all_findings)
+    if add_process_tree:
+        from edr_workbook_builder.proctree import build_process_tree_rows
+        tree_rows = build_process_tree_rows(load_results, sheet_names)
+        if tree_rows:
+            tree_df = pd.DataFrame(tree_rows, columns=["Process", "PID", "PPID", "CommandLine", "SourceSheet"])
+            ws_tree = wb.create_sheet(title="ProcessTree", index=0)
+            ws_tree.sheet_properties.tabColor = "7030A0"  # purple tab
+            write_dataframe_to_sheet(ws_tree, tree_df)
+            result.process_tree_node_count = len(tree_rows)
+            logger.info("ProcessTree: %d node(s) written", len(tree_rows))
+        else:
+            logger.warning(
+                "ProcessTree: no ProcessId/ParentProcessId columns found — sheet not created"
+            )
+
+    # Timeline sheet — inserted at index 0, pushed to index 1 when summary is added.
     if add_timeline:
         ts_col = find_best_timestamp_column(load_results, sheet_names)
         if ts_col is None:
