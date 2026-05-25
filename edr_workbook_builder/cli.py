@@ -175,6 +175,14 @@ examples:
         ),
     )
     parser.add_argument(
+        "--use-filename", action=boa, default=None,
+        help=(
+            "Use the CSV filename (without extension) as the sheet name instead of "
+            "auto-detecting the process name from column data. Useful when you already "
+            "name your EDR export files after the process they contain."
+        ),
+    )
+    parser.add_argument(
         "-v", "--verbose", action="store_true",
         help="Enable debug-level logging",
     )
@@ -262,7 +270,7 @@ def main() -> int:
             f"--{f.replace('_', '-')}" for f in (
                 "summary", "timeline", "recursive", "add_source_column",
                 "highlight", "escape_formulas", "attck", "decode_encoded",
-                "process_tree", "ioc_extract",
+                "process_tree", "ioc_extract", "use_filename",
             ) if getattr(args, f, False)
         ]
         if flags:
@@ -281,7 +289,9 @@ def main() -> int:
     raw_names: list[str] = []
 
     for result in load_results:
-        if result.dataframe is not None and not result.dataframe.empty:
+        if args.use_filename:
+            proc_name = None
+        elif result.dataframe is not None and not result.dataframe.empty:
             proc_name = detect_process_name(result.dataframe)
         else:
             proc_name = None
@@ -299,7 +309,12 @@ def main() -> int:
         if result.error:
             logger.warning("  SKIP  %-40s %s", result.path.name, result.error)
         else:
-            tag = f"(process: {proc_name})" if proc_name else "(fallback: filename)"
+            if args.use_filename:
+                tag = "(filename)"
+            elif proc_name:
+                tag = f"(process: {proc_name})"
+            else:
+                tag = "(fallback: filename)"
             logger.info(
                 "  SHEET %-40s %5d rows  %s",
                 result.path.name, result.row_count, tag,

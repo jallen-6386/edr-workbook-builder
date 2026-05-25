@@ -35,6 +35,7 @@ _DEFAULTS: dict[str, dict[str, str]] = {
         "process_tree":      "false",
         "decode_encoded":    "false",
         "ioc_extract":       "false",
+        "use_filename":      "false",
     },
     "analyst": {
         "name": "",
