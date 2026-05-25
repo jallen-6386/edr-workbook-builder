@@ -51,6 +51,7 @@ class WorkbookResult:
     timeline_timestamp_col: Optional[str] = None
     process_tree_node_count: int = 0
     ioc_count: int = 0
+    decoded_command_count: int = 0  # rows where DecodedCommand was populated
 
 logger = logging.getLogger(__name__)
 
@@ -193,6 +194,7 @@ def build_workbook(
 
     all_findings: list[RowFinding] = []
     sheets_created = 0
+    decoded_count = 0
 
     for result, sheet_name in zip(load_results, sheet_names):
         if result.error or result.dataframe is None:
@@ -220,6 +222,8 @@ def build_workbook(
         if decode_encoded:
             from edr_workbook_builder.patterns import add_decoded_column
             df = add_decoded_column(df)
+            if "DecodedCommand" in df.columns:
+                decoded_count += (df["DecodedCommand"] != "").sum()
 
         ws = wb.create_sheet(title=sheet_name)
         sheet_findings = write_dataframe_to_sheet(
@@ -249,7 +253,7 @@ def build_workbook(
         ws["A1"] = "No CSV files could be processed. Run with --verbose for details."
         ws["A1"].font = Font(name="Calibri", bold=True, color="C00000")
 
-    result = WorkbookResult(findings=all_findings)
+    result = WorkbookResult(findings=all_findings, decoded_command_count=decoded_count)
 
     # IOC Extract sheet — orange tab, inserted at index 0.
     if add_ioc_sheet:

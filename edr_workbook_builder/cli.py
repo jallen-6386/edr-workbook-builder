@@ -407,7 +407,11 @@ def main() -> int:
         print("  ATT&CK:     technique column added to each data sheet")
 
     if args.decode_encoded:
-        print("  Decoded:    DecodedCommand column added where -EncodedCommand detected")
+        n = wb_result.decoded_command_count
+        if n:
+            print(f"  Decoded:    {n} command(s) decoded — DecodedCommand column added after CommandLine")
+        else:
+            print("  Decoded:    no -EncodedCommand patterns found — DecodedCommand column not added")
 
     if args.process_tree:
         if wb_result.process_tree_node_count:
