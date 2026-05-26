@@ -320,6 +320,31 @@ python edr_csv_to_xlsx.py \
 
 ---
 
+### Launch the graphical interface
+
+```bash
+python edr_csv_to_xlsx.py --gui
+# or
+python -m edr_workbook_builder --gui
+```
+
+Opens a Tkinter window with the full set of options available as checkboxes and
+input fields. No flags are required — everything is point-and-click:
+
+- **Input / Output** — add one or more folders with the file picker, optionally
+  choose an output path, and enter a case name
+- **Options** — checkboxes for every feature flag (Summary, Timeline, Highlight,
+  ATT&CK, Process Tree, Decode Encoded, IOC Extract, Escape Formulas, Use
+  Filename, Add Source Column, Recursive)
+- **Advanced** — columns filter and max-rows cap
+- **Run** — builds the workbook in the background; log output streams into the
+  pane in real time
+- **Open output** — opens the finished `.xlsx` directly in Excel when done
+
+Requires no extra dependencies — Tkinter ships with Python on all platforms.
+
+---
+
 ### Preview without creating any files
 
 ```bash
@@ -350,6 +375,7 @@ python edr_csv_to_xlsx.py --input ./exports --dry-run
 | `--add-source-column` / `--no-add-source-column` | | Prepend a `SourceFile` column to each worksheet |
 | `--config FILE` | | Load additional config from FILE (overrides global and local config) |
 | `--save-config` | | Save current flag values to `.edr-workbook-builder.ini` |
+| `--gui` | | Launch the graphical interface (all other flags ignored) |
 | `--verbose` | `-v` | Debug-level logging |
 | `--dry-run` | | Show what would happen without writing output |
 | `--version` | `-V` | Print version and exit |
@@ -498,7 +524,8 @@ edr-workbook-builder/
 │   ├── timeline.py              # Timeline sheet: merged, chronologically sorted
 │   ├── attck.py                 # MITRE ATT&CK technique tagging with human-readable names
 │   ├── proctree.py              # Process tree reconstruction (DFS, PID recycling aware)
-│   └── ioc_extract.py           # IOC extraction: hashes, IPs, deduplicated output
+│   ├── ioc_extract.py           # IOC extraction: hashes, IPs, deduplicated output
+│   └── gui.py                   # Tkinter GUI (--gui flag or python -m edr_workbook_builder --gui)
 ├── tests/
 │   ├── test_sheet_names.py
 │   ├── test_process_detection.py
@@ -540,7 +567,8 @@ edr-workbook-builder/
 | **v0.3** | Suspicious pattern highlighting: LOLBin flagging, base64/encoded command detection, `--escape-formulas` |
 | **v0.4** | Timeline sheet: all events merged and sorted chronologically by detected timestamp column |
 | **v1.0** | Config file (`--save-config`), MITRE ATT&CK column tagging (`--attck`), process tree reconstruction (`--process-tree`) |
-| **v1.1** (current) | ATT&CK technique names, PowerShell decode (`--decode-encoded`), IOC extraction (`--ioc-extract`), parallel CSV loading, column filter (`--columns`), row cap (`--max-rows`), multiple `--input` folders, configurable LOLBin watchlist, PID recycling fix, filename-based sheet naming (`--use-filename`) |
+| **v1.1** | ATT&CK technique names, PowerShell decode (`--decode-encoded`), IOC extraction (`--ioc-extract`), parallel CSV loading, column filter (`--columns`), row cap (`--max-rows`), multiple `--input` folders, configurable LOLBin watchlist, PID recycling fix, filename-based sheet naming (`--use-filename`) |
+| **v1.2** (current) | Tkinter GUI (`--gui`) — full feature parity with the CLI, background thread, live log output |
 
 ---
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.backends.legacy:build"
 
 [project]
 name = "edr-workbook-builder"
-version = "1.1.0"
+version = "1.2.0"
 description = "Combine CrowdStrike EDR CSV exports into a single Excel workbook for CSIRT analysis"
 readme = "README.md"
 requires-python = ">=3.10"

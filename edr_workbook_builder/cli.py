@@ -78,6 +78,10 @@ examples:
     )
     parser.add_argument("--version", "-V", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument(
+        "--gui", action="store_true",
+        help="Launch the graphical interface (all other flags are ignored)",
+    )
+    parser.add_argument(
         "-i", "--input", required=True, action="append", dest="inputs", metavar="FOLDER",
         help=(
             "Folder containing CSV files to process. "
@@ -194,6 +198,11 @@ examples:
 
 
 def main() -> int:
+    if "--gui" in sys.argv:
+        from edr_workbook_builder.gui import run as _gui_run
+        _gui_run()
+        return 0
+
     parser = _build_parser()
     args = parser.parse_args()
     _setup_logging(args.verbose)
