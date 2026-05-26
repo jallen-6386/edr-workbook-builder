@@ -12,8 +12,9 @@ workbook for analysis — including with Excel Copilot.
 
 1. Reads all `.csv` files in one or more folders (optionally recursive), loading
    them in parallel for fast turnaround on large export sets
-2. Detects the process name from CrowdStrike EDR column names
-3. Writes each CSV as a separate worksheet, named after the process
+2. Names each worksheet either from the detected process name in the data, or
+   directly from the CSV filename when `--use-filename` is set
+3. Writes each CSV as a separate worksheet with full formatting
 4. Formats every sheet: header row, freeze panes, auto-filter, auto-sized columns
 5. Optionally creates a **Timeline** sheet — all events merged and sorted
    chronologically across every CSV on the best shared timestamp column
@@ -237,6 +238,26 @@ sheet that was truncated.
 
 ---
 
+### Use the CSV filename as the sheet name
+
+```bash
+python edr_csv_to_xlsx.py -i ./exports --use-filename
+```
+
+By default the tool derives the sheet name by detecting the dominant process in
+each CSV's column data. If you already name your EDR export files after the
+process they contain (e.g. `powershell.csv`, `rundll32.csv`), use `--use-filename`
+to skip that detection step and use the filename directly. Duplicate filenames are
+still deduplicated automatically (`powershell`, `powershell_2`, …).
+
+To make this the default for a directory, save it once:
+
+```bash
+python edr_csv_to_xlsx.py -i ./exports --use-filename --save-config
+```
+
+---
+
 ### Extend the LOLBin watchlist
 
 ```bash
@@ -291,6 +312,7 @@ python edr_csv_to_xlsx.py \
   --columns "Timestamp,ImageFileName,CommandLine,SHA256,RemoteIP" \
   --max-rows 10000 \
   --escape-formulas \
+  --use-filename \
   --recursive \
   --add-source-column \
   --verbose
@@ -321,6 +343,7 @@ python edr_csv_to_xlsx.py --input ./exports --dry-run
 | `--process-tree` / `--no-process-tree` | | Add a ProcessTree sheet (purple tab) from ProcessId/ParentProcessId columns |
 | `--decode-encoded` / `--no-decode-encoded` | | Add a `DecodedCommand` column decoding PowerShell -EncodedCommand blobs |
 | `--ioc-extract` / `--no-ioc-extract` | | Add an IOC_Extract sheet (orange tab) with deduplicated hashes and IPs |
+| `--use-filename` / `--no-use-filename` | | Use the CSV filename as the sheet name instead of auto-detecting the process name from column data |
 | `--columns COLS` | | Comma-separated list of columns to include in data sheets |
 | `--max-rows N` | | Truncate each data sheet to the first N rows |
 | `--recursive` / `--no-recursive` | `-r` | Search subfolders for CSV files |
@@ -342,7 +365,8 @@ Each data worksheet gets:
 - **Auto-filter** — click any column header to filter immediately
 - **Auto-sized columns** — sampled from up to 500 rows, capped at 60 chars
   (prevents `CommandLine` columns from making the sheet unusably wide)
-- **Worksheet name** — derived from the most common process name in the CSV,
+- **Worksheet name** — derived from the most common process name in the CSV by
+  default, or taken directly from the CSV filename with `--use-filename`;
   truncated and sanitized to satisfy Excel's 31-character limit
 
 ---
@@ -516,7 +540,7 @@ edr-workbook-builder/
 | **v0.3** | Suspicious pattern highlighting: LOLBin flagging, base64/encoded command detection, `--escape-formulas` |
 | **v0.4** | Timeline sheet: all events merged and sorted chronologically by detected timestamp column |
 | **v1.0** | Config file (`--save-config`), MITRE ATT&CK column tagging (`--attck`), process tree reconstruction (`--process-tree`) |
-| **v1.1** (current) | ATT&CK technique names, PowerShell decode (`--decode-encoded`), IOC extraction (`--ioc-extract`), parallel CSV loading, column filter (`--columns`), row cap (`--max-rows`), multiple `--input` folders, configurable LOLBin watchlist, PID recycling fix |
+| **v1.1** (current) | ATT&CK technique names, PowerShell decode (`--decode-encoded`), IOC extraction (`--ioc-extract`), parallel CSV loading, column filter (`--columns`), row cap (`--max-rows`), multiple `--input` folders, configurable LOLBin watchlist, PID recycling fix, filename-based sheet naming (`--use-filename`) |
 
 ---
 
