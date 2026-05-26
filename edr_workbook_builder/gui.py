@@ -222,11 +222,15 @@ class App(tk.Tk):
 
     def _browse_output(self) -> None:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        # Default the save dialog to the first input folder so the workbook
+        # lands somewhere the user already has write access to.
+        initial_dir = self._input_folders[0] if self._input_folders else str(Path.home())
         path = filedialog.asksaveasfilename(
             title="Save workbook as",
             defaultextension=".xlsx",
             filetypes=[("Excel workbook", "*.xlsx"), ("All files", "*.*")],
             initialfile=f"edr_analysis_{ts}.xlsx",
+            initialdir=initial_dir,
         )
         if path:
             self._output_var.set(path)
@@ -351,15 +355,26 @@ class App(tk.Tk):
                 raw_names.append(proc_name if proc_name else res.path.stem)
             sheet_names = make_unique_sheet_names(raw_names)
 
+            ts = timestamp.strftime("%Y%m%d_%H%M%S")
             if output_path is None:
-                ts = timestamp.strftime("%Y%m%d_%H%M%S")
                 if case_name:
                     slug = "".join(
                         c if c.isalnum() or c in "-_" else "_" for c in case_name
                     )[:50]
-                    output_path = Path(f"edr_analysis_{slug}_{ts}.xlsx")
+                    filename = f"edr_analysis_{slug}_{ts}.xlsx"
                 else:
-                    output_path = Path(f"edr_analysis_{ts}.xlsx")
+                    filename = f"edr_analysis_{ts}.xlsx"
+                # Default to the first input folder so we write somewhere writable.
+                output_path = Path(folders[0]) / filename
+            else:
+                # Ensure .xlsx extension even if the user typed a bare name.
+                if output_path.suffix.lower() != ".xlsx":
+                    output_path = output_path.with_suffix(".xlsx")
+                # A bare filename with no directory component is ambiguous —
+                # resolve it into the first input folder rather than wherever
+                # Python's cwd happens to be (often read-only on managed machines).
+                if not output_path.parent.name:
+                    output_path = Path(folders[0]) / output_path.name
 
             for res, sname, pname in zip(load_results, sheet_names, process_names):
                 if res.error:
