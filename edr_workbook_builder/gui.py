@@ -47,7 +47,7 @@ class App(tk.Tk):
         self.resizable(True, True)
 
         self._log_queue: queue.Queue = queue.Queue()
-        self._input_folders: list[str] = []
+        self._input_paths: list[str] = []   # may contain folders or individual .csv files
         self._running = False
         self._last_output: Optional[Path] = None
 
@@ -78,7 +78,7 @@ class App(tk.Tk):
         lf.grid(sticky="ew", pady=(0, self._PAD))
         lf.columnconfigure(1, weight=1)
 
-        ttk.Label(lf, text="Input folder(s):").grid(row=0, column=0, sticky="nw", padx=(0, 6))
+        ttk.Label(lf, text="Input:").grid(row=0, column=0, sticky="nw", padx=(0, 6))
 
         folder_frame = ttk.Frame(lf)
         folder_frame.grid(row=0, column=1, sticky="ew")
@@ -93,7 +93,8 @@ class App(tk.Tk):
         btn_frame = ttk.Frame(folder_frame)
         btn_frame.grid(row=1, column=0, columnspan=2, sticky="w", pady=(2, 0))
         ttk.Button(btn_frame, text="Add folder…", command=self._add_folder).pack(side=tk.LEFT, padx=(0, 4))
-        ttk.Button(btn_frame, text="Remove selected", command=self._remove_folder).pack(side=tk.LEFT)
+        ttk.Button(btn_frame, text="Add file(s)…", command=self._add_files).pack(side=tk.LEFT, padx=(0, 4))
+        ttk.Button(btn_frame, text="Remove selected", command=self._remove_entry).pack(side=tk.LEFT)
 
         ttk.Label(lf, text="Output file:").grid(
             row=1, column=0, sticky="w", padx=(0, 6), pady=(self._PAD, 0)
@@ -170,6 +171,11 @@ class App(tk.Tk):
         self._run_btn = ttk.Button(frame, text="Run", command=self._run, width=12)
         self._run_btn.pack(side=tk.LEFT, padx=(0, 6))
 
+        self._convert_btn = ttk.Button(
+            frame, text="Convert to Excel", command=self._convert, width=16,
+        )
+        self._convert_btn.pack(side=tk.LEFT, padx=(0, 6))
+
         self._open_btn = ttk.Button(
             frame, text="Open output", command=self._open_output,
             state=tk.DISABLED, width=14,
@@ -209,22 +215,33 @@ class App(tk.Tk):
 
     def _add_folder(self) -> None:
         path = filedialog.askdirectory(title="Select folder containing CSV files")
-        if path and path not in self._input_folders:
-            self._input_folders.append(path)
+        if path and path not in self._input_paths:
+            self._input_paths.append(path)
             self._folder_listbox.insert(tk.END, path)
 
-    def _remove_folder(self) -> None:
+    def _add_files(self) -> None:
+        paths = filedialog.askopenfilenames(
+            title="Select CSV file(s)",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+        )
+        for path in paths:
+            if path not in self._input_paths:
+                self._input_paths.append(path)
+                self._folder_listbox.insert(tk.END, path)
+
+    def _remove_entry(self) -> None:
         sel = self._folder_listbox.curselection()
         if sel:
             idx = sel[0]
-            self._input_folders.pop(idx)
+            self._input_paths.pop(idx)
             self._folder_listbox.delete(idx)
 
     def _browse_output(self) -> None:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        # Default the save dialog to the first input folder so the workbook
+        # Default the save dialog to the first input location so the workbook
         # lands somewhere the user already has write access to.
-        initial_dir = self._input_folders[0] if self._input_folders else str(Path.home())
+        first = self._input_paths[0] if self._input_paths else str(Path.home())
+        initial_dir = str(Path(first).parent if Path(first).is_file() else Path(first))
         path = filedialog.asksaveasfilename(
             title="Save workbook as",
             defaultextension=".xlsx",
@@ -253,11 +270,23 @@ class App(tk.Tk):
         self._log_text.configure(state=tk.DISABLED)
 
     def _run(self) -> None:
+        self._launch(flag_overrides=None)
+
+    def _convert(self) -> None:
+        """Convert selected CSV(s) to a formatted Excel file with no EDR analysis."""
+        self._launch(flag_overrides={
+            "summary": False, "timeline": False, "highlight": False,
+            "attck": False, "process_tree": False, "decode_encoded": False,
+            "ioc_extract": False, "escape_formulas": False,
+            "add_source_column": False, "use_filename": True,
+        })
+
+    def _launch(self, flag_overrides: Optional[dict]) -> None:
         if self._running:
             return
 
-        if not self._input_folders:
-            messagebox.showerror("Missing input", "Please add at least one input folder.")
+        if not self._input_paths:
+            messagebox.showerror("Missing input", "Please add at least one folder or CSV file.")
             return
 
         max_rows: Optional[int] = None
@@ -282,22 +311,25 @@ class App(tk.Tk):
         )
         case_name = self._case_name_var.get().strip() or None
         flags = {k: v.get() for k, v in self._flag_vars.items()}
+        if flag_overrides:
+            flags.update(flag_overrides)
 
         self._running = True
         self._run_btn.configure(state=tk.DISABLED)
+        self._convert_btn.configure(state=tk.DISABLED)
         self._open_btn.configure(state=tk.DISABLED)
         self._status_var.set("Running…")
         self._last_output = None
 
         threading.Thread(
             target=self._run_worker,
-            args=(self._input_folders[:], output_path, case_name, flags, columns_filter, max_rows),
+            args=(self._input_paths[:], output_path, case_name, flags, columns_filter, max_rows),
             daemon=True,
         ).start()
 
     def _run_worker(
         self,
-        folders: list[str],
+        paths: list[str],
         output_path: Optional[Path],
         case_name: Optional[str],
         flags: dict,
@@ -328,15 +360,21 @@ class App(tk.Tk):
             timestamp = datetime.now()
 
             csv_files: list[Path] = []
-            for folder_str in folders:
-                folder = Path(folder_str)
-                found = find_csv_files(folder, recursive=flags.get("recursive", False))
-                if not found:
-                    pkg_logger.warning("No CSV files found in: %s", folder)
-                csv_files.extend(found)
+            for path_str in paths:
+                p = Path(path_str)
+                if p.is_file():
+                    if p.suffix.lower() == ".csv":
+                        csv_files.append(p)
+                    else:
+                        pkg_logger.warning("Skipping non-CSV file: %s", p.name)
+                else:
+                    found = find_csv_files(p, recursive=flags.get("recursive", False))
+                    if not found:
+                        pkg_logger.warning("No CSV files found in: %s", p)
+                    csv_files.extend(found)
 
             if not csv_files:
-                raise RuntimeError("No CSV files found across all input folders.")
+                raise RuntimeError("No CSV files found.")
 
             pkg_logger.info("Found %d CSV file(s)", len(csv_files))
 
@@ -356,6 +394,10 @@ class App(tk.Tk):
             sheet_names = make_unique_sheet_names(raw_names)
 
             ts = timestamp.strftime("%Y%m%d_%H%M%S")
+            # Resolve the writable base directory from the first input path.
+            first_p = Path(paths[0])
+            base_dir = first_p.parent if first_p.is_file() else first_p
+
             if output_path is None:
                 if case_name:
                     slug = "".join(
@@ -364,17 +406,12 @@ class App(tk.Tk):
                     filename = f"edr_analysis_{slug}_{ts}.xlsx"
                 else:
                     filename = f"edr_analysis_{ts}.xlsx"
-                # Default to the first input folder so we write somewhere writable.
-                output_path = Path(folders[0]) / filename
+                output_path = base_dir / filename
             else:
-                # Ensure .xlsx extension even if the user typed a bare name.
                 if output_path.suffix.lower() != ".xlsx":
                     output_path = output_path.with_suffix(".xlsx")
-                # A bare filename with no directory component is ambiguous —
-                # resolve it into the first input folder rather than wherever
-                # Python's cwd happens to be (often read-only on managed machines).
                 if not output_path.parent.name:
-                    output_path = Path(folders[0]) / output_path.name
+                    output_path = base_dir / output_path.name
 
             for res, sname, pname in zip(load_results, sheet_names, process_names):
                 if res.error:
@@ -441,6 +478,7 @@ class App(tk.Tk):
     def _on_complete(self, result_path: Optional[Path]) -> None:
         self._running = False
         self._run_btn.configure(state=tk.NORMAL)
+        self._convert_btn.configure(state=tk.NORMAL)
 
         if result_path:
             self._last_output = result_path

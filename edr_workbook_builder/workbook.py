@@ -72,6 +72,9 @@ _MAX_COL_WIDTH = 60
 _MIN_COL_WIDTH = 8
 _SAMPLE_ROWS = 500
 
+# Excel's absolute row limit (1,048,576 total including the header row).
+EXCEL_MAX_DATA_ROWS = 1_048_575
+
 
 def _auto_size_columns(ws, df: pd.DataFrame) -> None:
     for col_idx, col_name in enumerate(df.columns, start=1):
@@ -208,12 +211,21 @@ def build_workbook(
             keep = [c for c in df.columns if c in columns_filter]
             df = df[keep] if keep else df
 
-        # Row cap.
+        # User-configured row cap.
         if max_rows is not None and len(df) > max_rows:
             logger.warning(
                 "Sheet '%s': truncated to %d rows (had %d)", sheet_name, max_rows, len(df)
             )
             df = df.iloc[:max_rows]
+
+        # Excel hard limit — silently enforced regardless of max_rows setting.
+        if len(df) > EXCEL_MAX_DATA_ROWS:
+            logger.warning(
+                "Sheet '%s': %d rows exceeds Excel's 1,048,576-row limit — "
+                "truncated to %d rows. Use --max-rows to avoid this.",
+                sheet_name, len(df), EXCEL_MAX_DATA_ROWS,
+            )
+            df = df.iloc[:EXCEL_MAX_DATA_ROWS]
 
         if add_attck:
             from edr_workbook_builder.attck import add_attck_column
