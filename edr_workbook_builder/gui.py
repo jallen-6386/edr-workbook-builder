@@ -160,8 +160,15 @@ class App(tk.Tk):
             row=1, column=0, sticky="w", padx=(0, 6), pady=(self._PAD, 0)
         )
         self._max_rows_var = tk.StringVar()
-        ttk.Entry(lf, textvariable=self._max_rows_var, width=12).grid(
-            row=1, column=1, sticky="w", pady=(self._PAD, 0)
+        ttk.Combobox(
+            lf,
+            textvariable=self._max_rows_var,
+            values=["No limit", "10000", "50000", "100000", "500000", "1000000"],
+            width=14,
+            state="normal",
+        ).grid(row=1, column=1, sticky="w", pady=(self._PAD, 0))
+        ttk.Label(lf, text="(or type a custom number)", foreground="gray").grid(
+            row=1, column=2, sticky="w", padx=(8, 0), pady=(self._PAD, 0)
         )
 
     def _build_actions(self, parent: ttk.Frame) -> None:
@@ -291,7 +298,7 @@ class App(tk.Tk):
 
         max_rows: Optional[int] = None
         raw_max = self._max_rows_var.get().strip()
-        if raw_max:
+        if raw_max and raw_max.lower() != "no limit":
             try:
                 max_rows = int(raw_max)
                 if max_rows <= 0:
