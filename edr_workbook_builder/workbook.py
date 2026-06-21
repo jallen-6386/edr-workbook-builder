@@ -18,6 +18,7 @@ Formatting choices:
 """
 
 import logging
+import math
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -211,21 +212,12 @@ def build_workbook(
             keep = [c for c in df.columns if c in columns_filter]
             df = df[keep] if keep else df
 
-        # User-configured row cap.
+        # User-configured row cap (truncation, intentional).
         if max_rows is not None and len(df) > max_rows:
             logger.warning(
                 "Sheet '%s': truncated to %d rows (had %d)", sheet_name, max_rows, len(df)
             )
             df = df.iloc[:max_rows]
-
-        # Excel hard limit — silently enforced regardless of max_rows setting.
-        if len(df) > EXCEL_MAX_DATA_ROWS:
-            logger.warning(
-                "Sheet '%s': %d rows exceeds Excel's 1,048,576-row limit — "
-                "truncated to %d rows. Use --max-rows to avoid this.",
-                sheet_name, len(df), EXCEL_MAX_DATA_ROWS,
-            )
-            df = df.iloc[:EXCEL_MAX_DATA_ROWS]
 
         if add_attck:
             from edr_workbook_builder.attck import add_attck_column
@@ -237,27 +229,50 @@ def build_workbook(
             if "DecodedCommand" in df.columns:
                 decoded_count += (df["DecodedCommand"] != "").sum()
 
-        ws = wb.create_sheet(title=sheet_name)
-        sheet_findings = write_dataframe_to_sheet(
-            ws,
-            df,
-            add_source=add_source_column,
-            source_name=result.path.name,
-            highlight_suspicious=highlight_suspicious,
-            escape_formulas=escape_formulas,
-        )
-        sheets_created += 1
-        logger.debug("Wrote sheet '%s' (%d rows)", sheet_name, result.row_count)
+        # Split into chunks when the data exceeds Excel's per-sheet row limit.
+        # Each chunk becomes a continuation sheet named "SheetName (2)", "(3)", …
+        if len(df) > EXCEL_MAX_DATA_ROWS:
+            num_chunks = math.ceil(len(df) / EXCEL_MAX_DATA_ROWS)
+            logger.warning(
+                "Sheet '%s': %d rows exceeds Excel's row limit — "
+                "splitting across %d sheets",
+                sheet_name, len(df), num_chunks,
+            )
+            chunks = [
+                df.iloc[i * EXCEL_MAX_DATA_ROWS:(i + 1) * EXCEL_MAX_DATA_ROWS]
+                for i in range(num_chunks)
+            ]
+        else:
+            chunks = [df]
 
-        for data_row, matches in sheet_findings:
-            process_name = next((m.process_exe for m in matches if m.process_exe), "")
-            all_findings.append(RowFinding(
-                sheet_name=sheet_name,
-                data_row=data_row,
-                process_name=process_name,
-                reasons=[m.reason for m in matches],
-                severity=max_severity(matches),
-            ))
+        for chunk_idx, chunk_df in enumerate(chunks):
+            if chunk_idx == 0:
+                chunk_name = sheet_name
+            else:
+                suffix = f" ({chunk_idx + 1})"
+                chunk_name = sheet_name[:31 - len(suffix)] + suffix
+
+            ws = wb.create_sheet(title=chunk_name)
+            sheet_findings = write_dataframe_to_sheet(
+                ws,
+                chunk_df,
+                add_source=add_source_column,
+                source_name=result.path.name,
+                highlight_suspicious=highlight_suspicious,
+                escape_formulas=escape_formulas,
+            )
+            sheets_created += 1
+            logger.debug("Wrote sheet '%s' (%d rows)", chunk_name, len(chunk_df))
+
+            for data_row, matches in sheet_findings:
+                process_name = next((m.process_exe for m in matches if m.process_exe), "")
+                all_findings.append(RowFinding(
+                    sheet_name=chunk_name,
+                    data_row=data_row,
+                    process_name=process_name,
+                    reasons=[m.reason for m in matches],
+                    severity=max_severity(matches),
+                ))
 
     # Guarantee at least one sheet (Excel requires it).
     if sheets_created == 0 and not add_summary and not add_timeline:
