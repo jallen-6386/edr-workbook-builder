@@ -2,7 +2,7 @@
 Convenience entry point — run directly without installing the package.
 
 Usage:
-    python edr_csv_to_xlsx.py --input ./crowdstrike_exports
+    python edr_csv_to_xlsx.py --input ./edr_exports
     python edr_csv_to_xlsx.py -i ./exports -o ./case123.xlsx --summary
     python edr_csv_to_xlsx.py --help
 """

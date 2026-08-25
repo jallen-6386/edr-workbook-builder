@@ -16,7 +16,7 @@ from pandas.errors import EmptyDataError
 
 logger = logging.getLogger(__name__)
 
-# Tried in order — CrowdStrike exports are usually UTF-8 with BOM
+# Tried in order — EDR exports are commonly UTF-8 with or without BOM
 _ENCODINGS = ["utf-8-sig", "utf-8", "windows-1252", "latin-1"]
 
 

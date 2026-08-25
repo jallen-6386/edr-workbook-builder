@@ -1,5 +1,5 @@
 """
-Suspicious pattern detection for CrowdStrike EDR data rows.
+Suspicious pattern detection for EDR data rows.
 
 Detects:
   - LOLBin (Living-off-the-Land Binary) process names

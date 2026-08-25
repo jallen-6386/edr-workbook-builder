@@ -56,7 +56,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="edr-workbook-builder",
         description=(
-            "Combine CrowdStrike EDR CSV exports into a single Excel workbook.\n"
+            "Combine EDR CSV exports into a single formatted Excel workbook.\n"
             "Each CSV becomes a separate worksheet named after the detected process."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,

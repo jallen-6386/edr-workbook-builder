@@ -1,5 +1,5 @@
 """
-Detect the primary process name from a CrowdStrike EDR CSV DataFrame.
+Detect the primary process name from an EDR CSV DataFrame.
 
 Checks known EDR column names in priority order. Extracts the executable
 stem from paths and command lines (handles Windows and Unix paths, quoted

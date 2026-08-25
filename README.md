@@ -1,10 +1,16 @@
 # EDR Workbook Builder
 
-**Combine CrowdStrike EDR CSV exports into a single formatted Excel workbook.**
+**Combine EDR CSV exports into a single formatted Excel workbook.**
 
-A Python CLI tool built for CSIRT/SOC analysts who export process tree logs
-from CrowdStrike Falcon and need to quickly assemble them into a clean `.xlsx`
-workbook for analysis — including with Excel Copilot.
+A Python CLI tool built for CSIRT/SOC analysts who export logs from their EDR
+platform and need to quickly assemble them into a clean `.xlsx` workbook for
+analysis — including with Excel Copilot.
+
+Compatible with any EDR platform that exports CSV data, including CrowdStrike
+Falcon, Microsoft Defender for Endpoint, SentinelOne, Carbon Black, Elastic
+Security, and others. Process name detection, timeline building, and IOC
+extraction are driven by common EDR column names (`ImageFileName`, `ProcessId`,
+`CommandLine`, `Timestamp`, etc.) and work across platforms automatically.
 
 ---
 
@@ -63,7 +69,7 @@ pip install -e .
 ### Minimal — folder of CSVs → workbook
 
 ```bash
-python edr_csv_to_xlsx.py --input ./crowdstrike_exports
+python edr_csv_to_xlsx.py --input ./edr_exports
 ```
 
 Output: `edr_analysis_20240612_143022.xlsx` in the current directory.
@@ -94,11 +100,11 @@ python edr_csv_to_xlsx.py -i ./exports -o ./case123_edr_analysis.xlsx
 ```bash
 python edr_csv_to_xlsx.py \
   -i ./exports \
-  --case-name "Falcon Alert - Suspicious PowerShell" \
+  --case-name "Suspicious PowerShell Activity" \
   --summary
 ```
 
-Output: `edr_analysis_Falcon_Alert___Suspicious_PowerShell_20240612_143022.xlsx`
+Output: `edr_analysis_Suspicious_PowerShell_Activity_20240612_143022.xlsx`
 
 ---
 
@@ -401,7 +407,7 @@ Each data worksheet gets:
 
 The tool looks for these columns **in priority order**:
 
-1. `ImageFileName` ← most reliable for CrowdStrike process events
+1. `ImageFileName` ← most reliable for process events
 2. `FileName`
 3. `ProcessName`
 4. `TargetProcessName`
@@ -455,7 +461,7 @@ When `--summary` is passed, the first worksheet contains:
 
 ---
 
-## Safe usage with CrowdStrike EDR exports
+## Safe usage with EDR exports
 
 **This tool is designed for secure internal SOC use:**
 
@@ -468,7 +474,7 @@ When `--summary` is passed, the first worksheet contains:
 
 **Be aware of:**
 
-- **CSV injection / formula injection**: If a CrowdStrike CSV contains a cell
+- **CSV injection / formula injection**: If an EDR CSV contains a cell
   that starts with `=`, `+`, or `-` (possible in CommandLine fields), Excel may
   interpret it as a formula when you open the file. This is a general Excel risk
   with any external data. Mitigate by keeping Excel macro security at the default
@@ -574,8 +580,8 @@ edr-workbook-builder/
 
 ## Future enhancement ideas
 
-- **CrowdStrike Falcon API integration** — pull exports directly via API instead
-  of requiring manual CSV downloads
+- **EDR platform API integration** — pull exports directly via platform API
+  instead of requiring manual CSV downloads
 - **Splunk / Google SecOps CSV support** — extend process detection for alternate
   EDR export formats
 - **Simple GUI / drag-and-drop** — Tkinter or a small web UI for analysts who

@@ -71,7 +71,7 @@ def _parse_ts(series: pd.Series) -> pd.Series:
     if series.empty:
         return pd.Series([], dtype="datetime64[ns, UTC]")
 
-    # Attempt numeric interpretation (CrowdStrike often exports epoch ms as strings).
+    # Attempt numeric interpretation (some EDR platforms export epoch ms as strings).
     numeric = pd.to_numeric(series, errors="coerce")
     n_numeric = int(numeric.notna().sum())
 

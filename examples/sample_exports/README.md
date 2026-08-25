@@ -1,9 +1,9 @@
 # Sample Exports
 
-Place CrowdStrike EDR CSV exports here for testing.
+Place EDR CSV exports here for testing.
 
-Each CSV should be a raw export from CrowdStrike Falcon's process tree view
-or EDR event search. The tool detects the process name automatically from
+Each CSV should be a raw export from your EDR platform's process tree view
+or event search. The tool detects the process name automatically from
 common column names such as `ImageFileName`, `FileName`, `ProcessName`, and
 `CommandLine`.
 
@@ -16,6 +16,6 @@ python edr_csv_to_xlsx.py -i examples/sample_exports --summary --dry-run
 
 ## Do not commit real EDR data
 
-Real CrowdStrike exports contain sensitive host information, process paths,
+Real EDR exports contain sensitive host information, process paths,
 hashes, and command-line arguments. Keep actual case exports out of version
 control.
